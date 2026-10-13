@@ -7,7 +7,12 @@ from pathlib import Path
 
 import click
 
-from ..comment_requests import RESOURCE_TYPES, build_comment_request, numeric_id
+from ..comment_requests import (
+    RESOURCE_TYPES,
+    build_comment_like_request,
+    build_comment_request,
+    numeric_id,
+)
 from ..config import ZHIHU_API_V4
 from ..display import console, print_success, print_warning
 from ..pagination import collect_pages, pagination_options
@@ -187,3 +192,26 @@ def delete_comment(comment_id, skip_confirm, dry_run, as_json):
         click.echo(json.dumps({"success": True, "id": comment_id}))
     else:
         print_success(f"Comment {comment_id} deleted")
+
+
+@click.command("like-comment")
+@click.argument("comment_id", type=click.IntRange(min=1))
+@click.option("--undo", is_flag=True, help="Remove your like from this comment.")
+@click.option("--dry-run", is_flag=True, help="Preview without logging in or sending.")
+@click.option("--json", "as_json", is_flag=True)
+def like_comment(comment_id, undo, dry_run, as_json):
+    """Like a root or child comment by its exact COMMENT_ID."""
+    plan = build_comment_like_request(comment_id, undo=undo)
+    if dry_run:
+        click.echo(json.dumps({"dry_run": True, **plan}, indent=2, ensure_ascii=False))
+        return
+    with _get_client() as client:
+        try:
+            result = client.like_comment(plan["comment_id"], undo=undo)
+        except Exception as error:
+            raise click.ClickException(str(error)) from error
+    if as_json:
+        click.echo(json.dumps(result, indent=2, ensure_ascii=False))
+    else:
+        action = "Removed like from" if undo else "Liked"
+        print_success(f"{action} comment {plan['comment_id']}")

@@ -59,6 +59,10 @@ def _show_comment(comment, label, indent="  ", root_id=None):
         console.print(f"{indent}   {line}", markup=False)
     likes = comment.get("vote_count", comment.get("like_count", 0))
     console.print(f"{indent}   {format_count(likes)} likes", markup=False)
+    if isinstance(comment.get("liked"), bool):
+        console.print(
+            f"{indent}   Liked by you: {'yes' if comment['liked'] else 'no'}", markup=False
+        )
     console.print()
 
 

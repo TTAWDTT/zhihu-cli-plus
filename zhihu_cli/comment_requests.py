@@ -20,6 +20,19 @@ def numeric_id(value: str | int, label: str = "ID") -> str:
     return str(int(text))
 
 
+def build_comment_like_request(comment_id: str | int, *, undo: bool = False) -> dict:
+    """Plan an explicit like/unlike without cookies or network access."""
+    comment_id = numeric_id(comment_id, "Comment ID")
+    if not isinstance(undo, bool):
+        raise ValueError("undo must be a boolean")
+    return {
+        "method": "DELETE" if undo else "POST",
+        "url": f"{ZHIHU_API_V4}/comments/{comment_id}/like",
+        "comment_id": comment_id,
+        "action": "unlike" if undo else "like",
+    }
+
+
 def build_comment_request(
     resource_id: str | int,
     content: str,

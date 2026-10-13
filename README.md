@@ -114,6 +114,31 @@ pytest -m integration --live tests/test_live.py --live-article-id <文章ID> --l
 正常工作的旧接口保持原请求方式，不统一强制加签；新增签名测试验证 URL 编码、Cookie 引号、
 设备 Cookie 变更及有限重试。发布与删除仍只做模拟测试，未改变账号内容。
 
+## 0.5：评论点赞与取消点赞
+
+根评论和子评论都可按实际评论 ID 点赞，无需原文章/回答 ID。`like-comment` 点赞，
+`--undo` 取消当前账号的点赞；`--dry-run` 离线预览请求，不读取 Cookie、不发送请求。
+
+```bash
+zhihu like-comment 789012 --dry-run --json
+zhihu like-comment 789012 --json
+zhihu like-comment 789012 --undo --json
+zhihu comment-detail 789012 --json
+```
+
+点赞与取消点赞均使用签名和 CSRF 头，一次写请求、不自动重试。只有接口明确确认成功，
+命令才输出成功；JSON 包含原始响应字段、字符串 `comment_id` 和目标 `liked` 状态。
+超时或不明确的响应会报告失败，应通过 `comment-detail` 的 `liked` 字段读回后再决定是否重试。
+
+真实点赞测试默认不执行，必须明确批准一个评论 ID，再启用专门的测试：
+
+```bash
+pytest -m integration_like --live --live-like --live-like-comment-id <评论ID> tests/test_live_comment_like.py
+```
+
+测试只允许对指定的、原先未点赞的他人评论执行一次点赞及一次取消，分别读回验证状态，
+恢复到原先未点赞状态。不创建或删除评论，不取消原先已有的点赞。
+
 ## 0.4：发布评论与回复
 
 新增 `comment` / `reply` / `comment-detail` / `replies` / `delete-comment`，所有命令支持 JSON。
