@@ -3,5 +3,5 @@
 A professional CLI tool for browsing Zhihu from the terminal.
 """
 
-__version__ = "0.4.1"
+__version__ = "0.5.0"
 __app_name__ = "zhihu-cli"

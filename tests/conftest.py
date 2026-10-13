@@ -103,6 +103,9 @@ def no_live_network(monkeypatch, request):
     if request.node.get_closest_marker("integration"):
         if not request.config.getoption("--live"):
             pytest.skip("Explicit --live is required for online tests")
+        if request.node.get_closest_marker("integration_like"):
+            _enable_comment_like_test(monkeypatch, request)
+            return
         write_mode = bool(request.node.get_closest_marker("integration_write"))
         if write_mode and not request.config.getoption("--live-write"):
             pytest.skip("Explicit --live-write approval is required for comment lifecycle tests")
@@ -190,6 +193,44 @@ def no_live_network(monkeypatch, request):
     monkeypatch.setattr("zhihu_cli.client.time.sleep", lambda _: None)
 
 
+def _enable_comment_like_test(monkeypatch, request):
+    """Allow exactly one like and one restoration on an explicitly selected ID."""
+    import time
+
+    import requests
+
+    from zhihu_cli.comment_requests import numeric_id
+
+    if not request.config.getoption("--live-like"):
+        pytest.skip("Explicit --live-like approval is required for a real comment like")
+    comment_id = request.config.getoption("--live-like-comment-id")
+    if not comment_id:
+        pytest.fail("A specific --live-like-comment-id is required")
+    state = {"comment_id": numeric_id(comment_id), "requests": []}
+    request.node.comment_like_state = state
+    allowed_url = f"https://www.zhihu.com/api/v4/comments/{state['comment_id']}/like"
+    original = requests.sessions.Session.request
+    last_request = [0.0]
+
+    def guarded(session, method, *args, **kwargs):
+        method = method.upper()
+        if method != "GET":
+            url = args[0] if args else kwargs.get("url")
+            if url != allowed_url or method not in ("POST", "DELETE"):
+                raise AssertionError("Only likes on the explicitly approved comment are allowed")
+            if kwargs.get("data") is not None or kwargs.get("json") is not None:
+                raise AssertionError("Comment likes must not send a body")
+            expected = "POST" if not state["requests"] else "DELETE"
+            if len(state["requests"]) >= 2 or method != expected:
+                raise AssertionError("Only one like followed by one restoration is allowed")
+            state["requests"].append(method)
+        time.sleep(max(0.0, 0.25 - (time.monotonic() - last_request[0])))
+        last_request[0] = time.monotonic()
+        return original(session, method, *args, **kwargs)
+
+    monkeypatch.setattr("requests.sessions.Session.request", guarded)
+
+
 def pytest_addoption(parser):
     parser.addoption(
         "--live", action="store_true", help="Enable read-only online integration tests"
@@ -205,3 +246,7 @@ def pytest_addoption(parser):
     )
     parser.addoption("--live-write-pin-id", help="Your own pin for the approved lifecycle test")
     parser.addoption("--live-write-marker", help="Unique marker shown in the approved test text")
+    parser.addoption(
+        "--live-like", action="store_true", help="Allow one approved comment like and restoration"
+    )
+    parser.addoption("--live-like-comment-id", help="Exact comment approved for the like test")

@@ -8,7 +8,7 @@ import click
 
 from . import __version__
 from .commands.auth import login, logout, status, whoami
-from .commands.comments import comment, comment_detail, delete_comment, replies, reply
+from .commands.comments import comment, comment_detail, delete_comment, like_comment, replies, reply
 from .commands.content import answer, answers, comments, feed, feeds, hot, question, search, topic
 from .commands.interact import (
     article,
@@ -82,6 +82,7 @@ cli.add_command(reply)
 cli.add_command(comment_detail)
 cli.add_command(replies)
 cli.add_command(delete_comment)
+cli.add_command(like_comment)
 
 
 if __name__ == "__main__":

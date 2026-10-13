@@ -201,6 +201,16 @@ def test_live_reported_article_ids_match_root_and_reply_bodies(live_client):
     assert checked_replies > 0
 
 
+@pytest.mark.parametrize("undo", [False, True])
+def test_live_comment_like_is_only_previewed(undo):
+    args = ["like-comment", "11595516969", "--dry-run"] + (["--undo"] if undo else [])
+    result = run_json(args)
+    assert result["dry_run"] is True
+    assert result["comment_id"] == "11595516969"
+    assert result["url"] == "https://www.zhihu.com/api/v4/comments/11595516969/like"
+    assert result["method"] == ("DELETE" if undo else "POST")
+
+
 @pytest.mark.parametrize("kind", ["article", "pin"])
 def test_live_v5_reverse_comment_sort(kind, live_context):
     check_collection(

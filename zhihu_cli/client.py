@@ -514,7 +514,7 @@ class ZhihuClient:
             code = self._api_error(response).get("code")
             suffix = f", code {code}" if code is not None else ""
             raise DataFetchError(f"Comment request rejected ({response.status_code}{suffix})")
-        if response.status_code == 204 and method == "DELETE":
+        if response.status_code == 204:
             return {"success": True}
         try:
             result = response.json()
@@ -583,6 +583,26 @@ class ZhihuClient:
         if result.get("success") is not True:
             raise DataFetchError("Comment deletion was not confirmed by the server")
         return True
+
+    def like_comment(self, comment_id: str, *, undo: bool = False) -> dict:
+        """Like a root/child comment, or remove the current account's like."""
+        from .comment_requests import build_comment_like_request
+
+        plan = build_comment_like_request(comment_id, undo=undo)
+        result = self._comment_write_once(plan["method"], plan["url"])
+        if result.get("success") is not True:
+            raise DataFetchError("Comment like operation was not confirmed; read before retrying")
+        for key in ("id", "comment_id"):
+            if key in result and str(result[key]) != plan["comment_id"]:
+                raise DataFetchError(
+                    "Comment like response has a mismatched ID; read before retrying"
+                )
+        liked = not undo
+        if "liked" in result and result["liked"] is not liked:
+            raise DataFetchError(
+                "Comment like response has an unexpected state; read before retrying"
+            )
+        return {**result, "comment_id": plan["comment_id"], "liked": liked}
 
     # ===== Vote =====
 
