@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -96,3 +94,14 @@ def mock_hot_list():
             },
         ],
     }
+
+
+@pytest.fixture(autouse=True)
+def no_live_network(monkeypatch):
+    """Unit tests may only use mocked HTTP and must never touch a real account."""
+
+    def blocked(*args, **kwargs):
+        raise AssertionError("Live HTTP is disabled in unit tests")
+
+    monkeypatch.setattr("requests.sessions.Session.request", blocked)
+    monkeypatch.setattr("zhihu_cli.client.time.sleep", lambda _: None)

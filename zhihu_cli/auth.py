@@ -15,7 +15,6 @@ from __future__ import annotations
 import json
 import logging
 import time
-from pathlib import Path
 
 import requests
 
@@ -23,15 +22,15 @@ from .config import (
     CONFIG_DIR,
     COOKIE_FILE,
     DEFAULT_TIMEOUT,
-    get_browser_headers,
     QRCODE_IMAGE_PATH,
     REQUIRED_COOKIES,
     ZHIHU_BASE_URL,
     ZHIHU_LOGIN_URL,
     ZHIHU_OAUTH_CAPTCHA,
     ZHIHU_QRCODE_API,
+    get_browser_headers,
 )
-from .display import console, print_error, print_hint, print_info, print_success, print_warning
+from .display import console, print_hint, print_info
 from .exceptions import LoginError
 
 logger = logging.getLogger(__name__)
@@ -42,7 +41,7 @@ def get_saved_cookie_string() -> str | None:
 
     This helper never triggers browser extraction and has no write side effects.
     """
-    return _load_saved_cookies()
+    return _load_saved_cookies(repair=False)
 
 
 def get_cookie_string() -> str | None:
@@ -55,7 +54,7 @@ def get_cookie_string() -> str | None:
 
 
 def _fetch_missing_cookies(cookie_dict: dict) -> dict:
-    """Request Zhihu homepage to obtain _xsrf and d_c0; return cookie_dict merged with received cookies."""
+    """Fetch missing _xsrf and d_c0 from the Zhihu homepage."""
     if "z_c0" not in cookie_dict:
         return cookie_dict
     session = requests.Session()
@@ -74,23 +73,27 @@ def _fetch_missing_cookies(cookie_dict: dict) -> dict:
     return out
 
 
-def _load_saved_cookies() -> str | None:
-    """Load cookies from saved file. If _xsrf or d_c0 are missing but z_c0 exists, fetch them from Zhihu and save."""
+def _load_saved_cookies(*, repair: bool = True) -> str | None:
+    """Load saved cookies, optionally repairing missing device/CSRF fields."""
     if not COOKIE_FILE.exists():
         return None
 
     try:
         data = json.loads(COOKIE_FILE.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return None
         cookies = data.get("cookies", {})
+        if not isinstance(cookies, dict):
+            return None
         if _has_required_cookies(cookies):
             return _dict_to_cookie_str(cookies)
         # Has z_c0 but missing _xsrf or d_c0 — try to fetch from Zhihu
-        if "z_c0" in cookies and (REQUIRED_COOKIES - cookies.keys()):
+        if repair and "z_c0" in cookies and (REQUIRED_COOKIES - cookies.keys()):
             merged = _fetch_missing_cookies(cookies)
             if _has_required_cookies(merged):
                 save_cookies(_dict_to_cookie_str(merged))
                 return _dict_to_cookie_str(merged)
-    except (json.JSONDecodeError, KeyError) as e:
+    except (OSError, json.JSONDecodeError, KeyError) as e:
         logger.warning("Failed to load saved cookies: %s", e)
 
     return None
@@ -188,8 +191,8 @@ def _qrcode_login_api() -> str:
     # 6. Poll scan_info until login success (官方: .../qrcode/{token}/scan_info)
     # 403 PERMISSION_ERROR 常见原因：Cookie 不完整、缺少 x-xsrftoken、或请求头被拒（需与浏览器一致）
     scan_url = f"{ZHIHU_QRCODE_API}/{token}/scan_info"
-    deadline = time.time() + 120  # 2 min
-    poll_interval = 0.15  # 约每 0.15 秒轮询，点完确认后更快得到结果
+    deadline = time.monotonic() + 120
+    poll_interval = 1.0
     # 轮询前确保有 _xsrf（与 x-xsrftoken 头一致），缺则补一次登录页
     if not session.cookies.get("_xsrf"):
         try:
@@ -205,11 +208,17 @@ def _qrcode_login_api() -> str:
     session.headers["sec-fetch-site"] = "same-origin"
     session.headers["x-requested-with"] = "fetch"
     session.headers["x-zse-93"] = "101_3_3.0"
-    while time.time() < deadline:
+    last_error = None
+    while time.monotonic() < deadline:
         time.sleep(poll_interval)
         _set_xsrf_header(session)
         try:
             resp = session.get(scan_url, timeout=10)
+            if resp.status_code in (401, 403):
+                raise LoginError(
+                    f"QR login polling rejected ({resp.status_code}); "
+                    "check authentication or use manual Cookie login"
+                )
             info = {}
             if resp.content:
                 try:
@@ -221,6 +230,7 @@ def _qrcode_login_api() -> str:
             # - status: 1 → 已扫码、未点确认，继续轮询
             # - 返回 access_token / user_id → 用户已点确认，登录成功
             if resp.status_code in (200, 201):
+                _apply_cookies_from_scan_info(session, info, resp)
                 api_status = info.get("status")
                 if api_status is not None and api_status == 0:
                     # 未扫码
@@ -247,11 +257,10 @@ def _qrcode_login_api() -> str:
                         break
                 if session.cookies.get("z_c0"):
                     break
-                _apply_cookies_from_scan_info(session, info, resp)
-                if session.cookies.get("z_c0"):
-                    break
             resp.raise_for_status()
-        except requests.RequestException:
+        except requests.RequestException as e:
+            last_error = e
+            poll_interval = min(poll_interval * 2, 5.0)
             continue
 
     # 7. 确认会话中已有 z_c0（scan_info 成功时由服务端 Set-Cookie）
@@ -265,7 +274,9 @@ def _qrcode_login_api() -> str:
     # 8. Collect cookies from session
     cookie_dict = dict(session.cookies)
 
-    if not REQUIRED_COOKIES.issubset(cookie_dict.keys()):
+    if not _has_required_cookies(cookie_dict):
+        if last_error is not None:
+            raise LoginError("QR login timed out after polling request failures") from last_error
         raise LoginError("二维码登录超时或未完成确认（未获取到 z_c0）")
 
     cookie_str = _dict_to_cookie_str(cookie_dict)
@@ -311,7 +322,9 @@ def _save_qrcode_image(qr_text: str) -> None:
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         img = qrcode.make(qr_text)
         img.save(QRCODE_IMAGE_PATH)
-        print_hint(f"二维码已保存至: [bold]{QRCODE_IMAGE_PATH}[/bold]（AI Agent 可读取并发送给用户扫码）")
+        print_hint(
+            f"二维码已保存至: [bold]{QRCODE_IMAGE_PATH}[/bold]（AI Agent 可读取并发送给用户扫码）"
+        )
     except Exception as e:
         logger.debug("Failed to save QR code image: %s", e)
 
@@ -340,9 +353,7 @@ def save_cookies(cookie_str: str):
     cookies = cookie_str_to_dict(cookie_str)
     data = {"cookies": cookies}
 
-    COOKIE_FILE.write_text(
-        json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    COOKIE_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
     try:
         COOKIE_FILE.chmod(0o600)
     except OSError:
@@ -362,7 +373,9 @@ def clear_cookies():
 
 
 def _has_required_cookies(cookies: dict) -> bool:
-    return REQUIRED_COOKIES.issubset(cookies.keys())
+    return all(
+        isinstance(cookies.get(key), str) and cookies[key].strip() for key in REQUIRED_COOKIES
+    )
 
 
 def _dict_to_cookie_str(cookies: dict) -> str:

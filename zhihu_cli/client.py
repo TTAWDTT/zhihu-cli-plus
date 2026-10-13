@@ -16,20 +16,22 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any
+from urllib.parse import urljoin, urlsplit
 
 import requests
 from PIL import Image
 
 from .config import (
     DEFAULT_TIMEOUT,
-    get_browser_headers,
     ZHIHU_API_V4,
     ZHIHU_CONTENT_DRAFTS_URL,
     ZHIHU_CONTENT_PUBLISH_URL,
     ZHIHU_IMAGE_API,
     ZHIHU_OSS_UPLOAD_URL,
     ZHIHU_ZHUANLAN_API,
+    get_browser_headers,
 )
+from .display import strip_html, to_html
 from .exceptions import DataFetchError, LoginError
 
 logger = logging.getLogger(__name__)
@@ -65,15 +67,28 @@ class ZhihuClient:
 
     def _get(self, url: str, params: dict | None = None) -> Any:
         """Make a GET request and return JSON response."""
-        try:
-            resp = self._session.get(url, params=params, timeout=DEFAULT_TIMEOUT)
-        except requests.RequestException as e:
-            raise DataFetchError(f"Request failed: {e}") from e
+        for attempt in range(3):
+            try:
+                resp = self._session.get(
+                    url, params=params, timeout=DEFAULT_TIMEOUT, allow_redirects=False
+                )
+            except requests.RequestException as e:
+                if attempt == 2:
+                    raise DataFetchError(f"Request failed: {e}") from e
+                time.sleep(0.5 * 2**attempt)
+                continue
+            if resp.status_code not in (429, 500, 502, 503, 504) or attempt == 2:
+                break
+            try:
+                delay = min(max(float(resp.headers.get("Retry-After", "")), 0), 5)
+            except (TypeError, ValueError):
+                delay = 0.5 * 2**attempt
+            time.sleep(delay)
 
         if resp.status_code == 401:
-            raise LoginError("Session expired or not logged in")
+            raise LoginError("Session expired or not logged in", status_code=401)
         if resp.status_code == 403:
-            raise LoginError("Access denied — check login status")
+            raise LoginError("Access denied — check login status", status_code=403)
         if resp.status_code != 200:
             raise DataFetchError(
                 f"API request failed with status {resp.status_code}: {resp.text[:200]}"
@@ -83,6 +98,26 @@ class ZhihuClient:
             return resp.json()
         except ValueError as e:
             raise DataFetchError(f"Invalid JSON response: {e}") from e
+
+    def get_next_page(self, url: str) -> dict:
+        """Resume an API cursor without sending credentials to another host."""
+        url = urljoin("https://www.zhihu.com", url)
+        parsed = urlsplit(url)
+        try:
+            valid_port = parsed.port in (None, 443)
+        except ValueError:
+            valid_port = False
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname != "www.zhihu.com"
+            or parsed.username
+            or parsed.password
+            or not valid_port
+            or not parsed.path.startswith(("/api/v3/", "/api/v4/"))
+            or parsed.fragment
+        ):
+            raise DataFetchError("Invalid pagination URL: expected a Zhihu HTTPS API URL")
+        return self._get(url)
 
     # ===== Self Info =====
 
@@ -96,8 +131,9 @@ class ZhihuClient:
 
     # ===== Search =====
 
-    def search(self, keyword: str, search_type: str = "general",
-               offset: int = 0, limit: int = 20) -> dict:
+    def search(
+        self, keyword: str, search_type: str = "general", offset: int = 0, limit: int = 20
+    ) -> dict:
         """Search Zhihu content.
 
         Args:
@@ -155,9 +191,9 @@ class ZhihuClient:
 
     # ===== Question Answers =====
 
-    def get_question_answers(self, question_id: str,
-                             offset: int = 0, limit: int = 20,
-                             sort_by: str = "default") -> dict:
+    def get_question_answers(
+        self, question_id: str, offset: int = 0, limit: int = 20, sort_by: str = "default"
+    ) -> dict:
         """Get answers for a question.
 
         Args:
@@ -169,8 +205,7 @@ class ZhihuClient:
         url = f"{ZHIHU_API_V4}/questions/{question_id}/answers"
         params = {
             "include": (
-                "data[*].content,voteup_count,comment_count,"
-                "created_time,updated_time,author"
+                "data[*].content,voteup_count,comment_count,created_time,updated_time,author"
             ),
             "offset": offset,
             "limit": limit,
@@ -185,8 +220,7 @@ class ZhihuClient:
         url = f"{ZHIHU_API_V4}/answers/{answer_id}"
         params = {
             "include": (
-                "content,voteup_count,comment_count,"
-                "created_time,updated_time,author,question"
+                "content,voteup_count,comment_count,created_time,updated_time,author,question"
             ),
         }
         return self._get(url, params=params)
@@ -197,7 +231,7 @@ class ZhihuClient:
         """Get user profile by url_token.
 
         Args:
-            url_token: The user's URL token (e.g., 'excited-vibe' from zhihu.com/people/excited-vibe).
+            url_token: The profile URL token (zhihu.com/people/<url_token>).
         """
         url = f"{ZHIHU_API_V4}/members/{url_token}"
         params = {
@@ -213,9 +247,9 @@ class ZhihuClient:
 
     # ===== User Answers =====
 
-    def get_user_answers(self, url_token: str,
-                         offset: int = 0, limit: int = 20,
-                         sort_by: str = "created") -> dict:
+    def get_user_answers(
+        self, url_token: str, offset: int = 0, limit: int = 20, sort_by: str = "created"
+    ) -> dict:
         """Get a user's answers.
 
         Args:
@@ -226,10 +260,7 @@ class ZhihuClient:
         """
         url = f"{ZHIHU_API_V4}/members/{url_token}/answers"
         params = {
-            "include": (
-                "data[*].content,voteup_count,comment_count,"
-                "created_time,question"
-            ),
+            "include": ("data[*].content,voteup_count,comment_count,created_time,question"),
             "offset": offset,
             "limit": limit,
             "sort_by": sort_by,
@@ -238,9 +269,9 @@ class ZhihuClient:
 
     # ===== User Articles =====
 
-    def get_user_articles(self, url_token: str,
-                          offset: int = 0, limit: int = 20,
-                          sort_by: str = "created") -> dict:
+    def get_user_articles(
+        self, url_token: str, offset: int = 0, limit: int = 20, sort_by: str = "created"
+    ) -> dict:
         """Get a user's articles (涓撴爮鏂囩珷).
 
         Args:
@@ -251,10 +282,7 @@ class ZhihuClient:
         """
         url = f"{ZHIHU_API_V4}/members/{url_token}/articles"
         params = {
-            "include": (
-                "data[*].content,voteup_count,comment_count,"
-                "created_time,updated_time"
-            ),
+            "include": ("data[*].content,voteup_count,comment_count,created_time,updated_time"),
             "offset": offset,
             "limit": limit,
             "sort_by": sort_by,
@@ -263,8 +291,7 @@ class ZhihuClient:
 
     # ===== Followers / Following =====
 
-    def get_followers(self, url_token: str,
-                      offset: int = 0, limit: int = 20) -> dict:
+    def get_followers(self, url_token: str, offset: int = 0, limit: int = 20) -> dict:
         """Get a user's followers."""
         url = f"{ZHIHU_API_V4}/members/{url_token}/followers"
         params = {
@@ -274,8 +301,7 @@ class ZhihuClient:
         }
         return self._get(url, params=params)
 
-    def get_following(self, url_token: str,
-                      offset: int = 0, limit: int = 20) -> dict:
+    def get_following(self, url_token: str, offset: int = 0, limit: int = 20) -> dict:
         """Get a user's following."""
         url = f"{ZHIHU_API_V4}/members/{url_token}/followees"
         params = {
@@ -287,11 +313,11 @@ class ZhihuClient:
 
     # ===== Feed =====
 
-    def get_feed(self, limit: int = 20) -> dict:
+    def get_feed(self, limit: int = 20, page_number: int = 1) -> dict:
         """Get recommended feed from homepage."""
         url = "https://www.zhihu.com/api/v3/feed/topstory/recommend"
         params = {
-            "page_number": 1,
+            "page_number": page_number,
             "limit": limit,
             "action": "down",
         }
@@ -307,8 +333,7 @@ class ZhihuClient:
         url = f"{ZHIHU_API_V4}/topics/{topic_id}"
         return self._get(url)
 
-    def get_topic_hot_questions(self, topic_id: str,
-                                offset: int = 0, limit: int = 10) -> dict:
+    def get_topic_hot_questions(self, topic_id: str, offset: int = 0, limit: int = 10) -> dict:
         """Get hot questions under a topic."""
         url = f"{ZHIHU_API_V4}/topics/{topic_id}/feeds/essence"
         params = {"offset": offset, "limit": limit}
@@ -316,9 +341,9 @@ class ZhihuClient:
 
     # ===== Comments =====
 
-    def get_answer_comments(self, answer_id: str,
-                            offset: int = 0, limit: int = 20,
-                            order: str = "normal") -> dict:
+    def get_answer_comments(
+        self, answer_id: str, offset: int = 0, limit: int = 20, order: str = "normal"
+    ) -> dict:
         """Get comments on an answer.
 
         Args:
@@ -335,6 +360,31 @@ class ZhihuClient:
             "status": "open",
         }
         return self._get(url, params=params)
+
+    def get_comments(
+        self,
+        resource_id: str,
+        resource_type: str = "answer",
+        offset: str | int = 0,
+        limit: int = 20,
+        order: str = "normal",
+    ) -> dict:
+        """Read comments for an answer, article, or pin."""
+        resources = {"answer": "answers", "article": "articles", "pin": "pins"}
+        if resource_type not in resources:
+            raise DataFetchError("Unsupported comment resource type")
+        if resource_type == "answer":
+            return self.get_answer_comments(resource_id, offset=offset, limit=limit, order=order)
+        return self._get(
+            f"{ZHIHU_API_V4}/{resources[resource_type]}/{resource_id}/comments",
+            params={"offset": offset, "limit": limit, "order": order, "status": "open"},
+        )
+
+    def get_article(self, article_id: str) -> dict:
+        return self._get(f"{ZHIHU_API_V4}/articles/{article_id}")
+
+    def get_pin(self, pin_id: str) -> dict:
+        return self._get(f"{ZHIHU_API_V4}/pins/{pin_id}")
 
     # ===== Vote =====
 
@@ -382,8 +432,7 @@ class ZhihuClient:
 
     # ===== Image Upload =====
 
-    def upload_image(self, file_path: str,
-                     source: str = "article") -> dict:
+    def upload_image(self, file_path: str, source: str = "article") -> dict:
         """Upload an image to Zhihu and return image info.
 
         Handles the full flow: register → OSS upload → poll → return info.
@@ -440,10 +489,15 @@ class ZhihuClient:
 
         return image_info
 
-    def _upload_to_oss(self, obj_key: str, data: bytes,
-                       token: dict) -> None:
+    def _upload_to_oss(self, obj_key: str, data: bytes, token: dict) -> None:
         """Upload image data to Alibaba Cloud OSS."""
-        content_type = "image/jpeg"
+        try:
+            from io import BytesIO
+
+            with Image.open(BytesIO(data)) as image:
+                content_type = Image.MIME.get(image.format, "application/octet-stream")
+        except (OSError, ValueError):
+            raise DataFetchError("Unsupported or invalid image file") from None
         date = email.utils.formatdate(usegmt=True)
         security_token = token["access_token"]
         access_id = token["access_id"]
@@ -455,9 +509,7 @@ class ZhihuClient:
             f"/zhihu-pics/{obj_key}"
         )
         signature = base64.b64encode(
-            hmac.new(
-                access_key.encode(), string_to_sign.encode(), hashlib.sha1
-            ).digest()
+            hmac.new(access_key.encode(), string_to_sign.encode(), hashlib.sha1).digest()
         ).decode()
 
         headers = {
@@ -469,30 +521,29 @@ class ZhihuClient:
         try:
             resp = requests.put(
                 f"{ZHIHU_OSS_UPLOAD_URL}/{obj_key}",
-                data=data, headers=headers, timeout=DEFAULT_TIMEOUT,
+                data=data,
+                headers=headers,
+                timeout=DEFAULT_TIMEOUT,
             )
         except requests.RequestException as e:
             raise DataFetchError(f"OSS upload failed: {e}") from e
         if resp.status_code != 200:
-            raise DataFetchError(
-                f"OSS upload failed ({resp.status_code}): {resp.text[:200]}"
-            )
+            raise DataFetchError(f"OSS upload failed ({resp.status_code}): {resp.text[:200]}")
 
-    def _poll_image(self, image_id: str, max_attempts: int = 15,
-                    interval: float = 2.0) -> dict:
+    def _poll_image(self, image_id: str, max_attempts: int = 15, interval: float = 2.0) -> dict:
         """Poll image status until processing completes."""
         import time
+
         for _ in range(max_attempts):
             try:
                 resp = self._session.get(
-                    f"{ZHIHU_IMAGE_API}/{image_id}", timeout=DEFAULT_TIMEOUT,
+                    f"{ZHIHU_IMAGE_API}/{image_id}",
+                    timeout=DEFAULT_TIMEOUT,
                 )
             except requests.RequestException as e:
                 raise DataFetchError(f"Image poll failed: {e}") from e
             if resp.status_code != 200:
-                raise DataFetchError(
-                    f"Image poll failed ({resp.status_code}): {resp.text[:200]}"
-                )
+                raise DataFetchError(f"Image poll failed ({resp.status_code}): {resp.text[:200]}")
             data = resp.json()
             if data.get("status") == "success":
                 return {
@@ -530,7 +581,8 @@ class ZhihuClient:
         """Create a content draft and return the content_id."""
         try:
             resp = self._session.post(
-                ZHIHU_CONTENT_DRAFTS_URL, json={"action": action},
+                ZHIHU_CONTENT_DRAFTS_URL,
+                json={"action": action},
                 timeout=DEFAULT_TIMEOUT,
             )
         except requests.RequestException as e:
@@ -538,9 +590,7 @@ class ZhihuClient:
         if resp.status_code == 401:
             raise LoginError("Session expired or not logged in")
         if resp.status_code != 200:
-            raise DataFetchError(
-                f"Create draft failed ({resp.status_code}): {resp.text[:200]}"
-            )
+            raise DataFetchError(f"Create draft failed ({resp.status_code}): {resp.text[:200]}")
         data = resp.json()
         content_id = data.get("data", {}).get("content_id", "")
         if not content_id:
@@ -552,8 +602,10 @@ class ZhihuClient:
         headers = {"x-requested-with": "fetch"}
         try:
             resp = self._session.post(
-                ZHIHU_CONTENT_PUBLISH_URL, json=payload,
-                headers=headers, timeout=DEFAULT_TIMEOUT,
+                ZHIHU_CONTENT_PUBLISH_URL,
+                json=payload,
+                headers=headers,
+                timeout=DEFAULT_TIMEOUT,
             )
         except requests.RequestException as e:
             raise DataFetchError(f"Publish failed: {e}") from e
@@ -561,13 +613,11 @@ class ZhihuClient:
         if resp.status_code == 401:
             raise LoginError("Session expired or not logged in")
         if resp.status_code not in (200, 201):
-            raise DataFetchError(
-                f"Publish failed ({resp.status_code}): {resp.text[:200]}"
-            )
+            raise DataFetchError(f"Publish failed ({resp.status_code}): {resp.text[:200]}")
         try:
             data = resp.json()
-        except ValueError:
-            return {}
+        except ValueError as e:
+            raise DataFetchError("Invalid publish response; verify before retrying") from e
         code = data.get("code")
         if code is not None and code != 0:
             msg = data.get("message") or data.get("toast_message") or "Unknown error"
@@ -582,9 +632,13 @@ class ZhihuClient:
 
     # ===== Create Question =====
 
-    def create_question(self, title: str, detail: str = "",
-                        topic_ids: list[str] | None = None,
-                        image_infos: list[dict] | None = None) -> dict:
+    def create_question(
+        self,
+        title: str,
+        detail: str = "",
+        topic_ids: list[str] | None = None,
+        image_infos: list[dict] | None = None,
+    ) -> dict:
         """Create a new question.
 
         Args:
@@ -605,7 +659,7 @@ class ZhihuClient:
                     "topic": {"topics": list(topic_ids) if topic_ids else []},
                     "hybrid": {
                         "html": html,
-                        "textLength": len(detail),
+                        "textLength": len(strip_html(detail)),
                     },
                     "extra_info": {"publisher": "pc"},
                     "questionConfig": {"type": "0"},
@@ -629,18 +683,17 @@ class ZhihuClient:
         if resp.status_code == 401:
             raise LoginError("Session expired or not logged in")
         if resp.status_code not in (200, 201):
-            raise DataFetchError(
-                f"Create question failed ({resp.status_code}): {resp.text[:200]}"
-            )
+            raise DataFetchError(f"Create question failed ({resp.status_code}): {resp.text[:200]}")
         try:
             return resp.json()
-        except ValueError:
-            return {}
+        except ValueError as e:
+            raise DataFetchError("Invalid publish response; verify before retrying") from e
 
     # ===== Create Pin (想法) =====
 
-    def create_pin(self, title: str, content: str = "",
-                   image_infos: list[dict] | None = None) -> dict:
+    def create_pin(
+        self, title: str, content: str = "", image_infos: list[dict] | None = None
+    ) -> dict:
         """Create a new pin (想法).
 
         Args:
@@ -656,8 +709,8 @@ class ZhihuClient:
 
         # No images: use content/publish API with same payload shape as with-images
         draft_id = self._create_content_draft("pin")
-        body_html = f"<p>{content.strip()}</p>" if content.strip() else ""
-        text_len = len(content.strip())
+        body_html = to_html(content)
+        text_len = len(strip_html(content))
         payload = {
             "action": "pin",
             "data": {
@@ -676,8 +729,7 @@ class ZhihuClient:
         }
         return self._content_publish(payload)
 
-    def _create_pin_with_images(self, title: str, content: str,
-                                image_infos: list[dict]) -> dict:
+    def _create_pin_with_images(self, title: str, content: str, image_infos: list[dict]) -> dict:
         """Create a pin with images via the content/publish API.
         Payload structure aligned with question: title + hybrid (html/content).
         """
@@ -695,7 +747,7 @@ class ZhihuClient:
             }
             for info in image_infos
         ]
-        html = content + self._build_img_html(image_infos) if content else self._build_img_html(image_infos)
+        html = to_html(content) + self._build_img_html(image_infos)
         payload = {
             "action": "pin",
             "data": {
@@ -706,7 +758,7 @@ class ZhihuClient:
                 "title": {"title": title},
                 "hybrid": {
                     "html": html,
-                    "textLength": len(title) + len(content),
+                    "textLength": len(strip_html(content)),
                 },
                 "media": {"medias": medias},
             },
@@ -715,9 +767,13 @@ class ZhihuClient:
 
     # ===== Create Article (专栏文章) =====
 
-    def create_article(self, title: str, content: str,
-                        topic_ids: list[str] | None = None,
-                        image_infos: list[dict] | None = None) -> dict:
+    def create_article(
+        self,
+        title: str,
+        content: str,
+        topic_ids: list[str] | None = None,
+        image_infos: list[dict] | None = None,
+    ) -> dict:
         """Create and publish a new article.
 
         Workflow: create draft → set title/content → publish.
@@ -741,13 +797,15 @@ class ZhihuClient:
                     "title": {"title": title},
                     "hybrid": {
                         "html": html,
-                        "textLength": len(content),
+                        "textLength": len(strip_html(content)),
                     },
                     "extra_info": {"publisher": "pc"},
                     "draft": {"disabled": 1, "id": draft_id},
                     "commentsPermission": {"comment_permission": "anyone"},
                 },
             }
+            if topic_ids:
+                payload["data"]["topic"] = {"topics": list(topic_ids)}
             return self._content_publish(payload)
 
         base = ZHIHU_ZHUANLAN_API
@@ -755,7 +813,9 @@ class ZhihuClient:
         # Step 1: create draft
         try:
             resp = self._session.post(
-                f"{base}/articles/drafts", json={}, timeout=DEFAULT_TIMEOUT,
+                f"{base}/articles/drafts",
+                json={},
+                timeout=DEFAULT_TIMEOUT,
             )
         except requests.RequestException as e:
             raise DataFetchError(f"Create article draft failed: {e}") from e
@@ -803,13 +863,11 @@ class ZhihuClient:
         if resp.status_code == 401:
             raise LoginError("Session expired or not logged in")
         if resp.status_code != 200:
-            raise DataFetchError(
-                f"Publish article failed ({resp.status_code}): {resp.text[:200]}"
-            )
+            raise DataFetchError(f"Publish article failed ({resp.status_code}): {resp.text[:200]}")
         try:
             return resp.json()
-        except ValueError:
-            return {}
+        except ValueError as e:
+            raise DataFetchError("Invalid publish response; verify before retrying") from e
 
     # ===== Delete Own Content =====
 
@@ -876,8 +934,7 @@ class ZhihuClient:
 
     # ===== Notifications =====
 
-    def get_notifications(self, limit: int = 10, offset: int = 0,
-                          entry_name: str = "all") -> dict:
+    def get_notifications(self, limit: int = 10, offset: int = 0, entry_name: str = "all") -> dict:
         """Get recent notifications (v2/recent).
 
         Returns dict with ``paging`` (is_end, next, previous) and ``data`` list.

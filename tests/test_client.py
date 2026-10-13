@@ -6,9 +6,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
+from PIL import Image
 
 from zhihu_cli.client import ZhihuClient
-from zhihu_cli.config import DEFAULT_TIMEOUT, ZHIHU_API_V4, ZHIHU_CONTENT_DRAFTS_URL, ZHIHU_CONTENT_PUBLISH_URL
 from zhihu_cli.exceptions import DataFetchError, LoginError
 
 
@@ -24,6 +24,7 @@ def _make_response(status_code=200, json_data=None, text=""):
     """Create a mock requests.Response."""
     resp = MagicMock(spec=requests.Response)
     resp.status_code = status_code
+    resp.headers = {}
     resp.text = text
     resp.json.return_value = json_data if json_data is not None else {}
     return resp
@@ -62,7 +63,8 @@ class TestClientGet:
 
     def test_500_raises_data_fetch_error(self, client):
         with patch.object(
-            client._session, "get",
+            client._session,
+            "get",
             return_value=_make_response(500, text="Internal Server Error"),
         ):
             with pytest.raises(DataFetchError, match="500"):
@@ -70,7 +72,8 @@ class TestClientGet:
 
     def test_request_exception_raises_data_fetch_error(self, client):
         with patch.object(
-            client._session, "get",
+            client._session,
+            "get",
             side_effect=requests.ConnectionError("Connection refused"),
         ):
             with pytest.raises(DataFetchError, match="Request failed"):
@@ -86,7 +89,8 @@ class TestClientGet:
     def test_200_returns_json(self, client):
         data = {"name": "test"}
         with patch.object(
-            client._session, "get",
+            client._session,
+            "get",
             return_value=_make_response(200, json_data=data),
         ):
             result = client._get("https://example.com")
@@ -99,7 +103,8 @@ class TestClientGet:
 class TestGetSelfInfo:
     def test_returns_user_dict(self, client, mock_user_info):
         with patch.object(
-            client._session, "get",
+            client._session,
+            "get",
             return_value=_make_response(200, json_data=mock_user_info),
         ):
             result = client.get_self_info()
@@ -108,7 +113,8 @@ class TestGetSelfInfo:
 
     def test_returns_empty_dict_for_non_dict(self, client):
         with patch.object(
-            client._session, "get",
+            client._session,
+            "get",
             return_value=_make_response(200, json_data=[]),
         ):
             result = client.get_self_info()
@@ -121,7 +127,8 @@ class TestGetSelfInfo:
 class TestSearch:
     def test_search_calls_api(self, client, mock_search_result):
         with patch.object(
-            client._session, "get",
+            client._session,
+            "get",
             return_value=_make_response(200, json_data=mock_search_result),
         ) as mock_get:
             result = client.search("Python", search_type="general", limit=5)
@@ -139,7 +146,8 @@ class TestSearch:
 class TestGetHotList:
     def test_returns_dict_with_data(self, client, mock_hot_list):
         with patch.object(
-            client._session, "get",
+            client._session,
+            "get",
             return_value=_make_response(200, json_data=mock_hot_list),
         ):
             result = client.get_hot_list(limit=2)
@@ -165,7 +173,8 @@ class TestGetHotList:
 
     def test_wraps_list_result(self, client):
         with patch.object(
-            client._session, "get",
+            client._session,
+            "get",
             return_value=_make_response(200, json_data=[{"q": "test"}]),
         ):
             result = client.get_hot_list()
@@ -180,7 +189,8 @@ class TestGetQuestion:
     def test_question_api_url(self, client):
         q_data = {"title": "Test Q", "answer_count": 5}
         with patch.object(
-            client._session, "get",
+            client._session,
+            "get",
             return_value=_make_response(200, json_data=q_data),
         ) as mock_get:
             result = client.get_question("12345")
@@ -195,7 +205,8 @@ class TestGetQuestionAnswers:
     def test_returns_answers(self, client):
         ans_data = {"data": [{"id": 1, "voteup_count": 10}]}
         with patch.object(
-            client._session, "get",
+            client._session,
+            "get",
             return_value=_make_response(200, json_data=ans_data),
         ):
             result = client.get_question_answers("12345", limit=5)
@@ -203,7 +214,8 @@ class TestGetQuestionAnswers:
 
     def test_sort_by_param(self, client):
         with patch.object(
-            client._session, "get",
+            client._session,
+            "get",
             return_value=_make_response(200, json_data={"data": []}),
         ) as mock_get:
             client.get_question_answers("12345", sort_by="created")
@@ -218,7 +230,8 @@ class TestGetAnswer:
     def test_answer_api_url(self, client):
         ans = {"content": "Answer content", "voteup_count": 100}
         with patch.object(
-            client._session, "get",
+            client._session,
+            "get",
             return_value=_make_response(200, json_data=ans),
         ) as mock_get:
             result = client.get_answer("67890")
@@ -232,7 +245,8 @@ class TestGetAnswer:
 class TestGetUserProfile:
     def test_returns_profile(self, client, mock_user_info):
         with patch.object(
-            client._session, "get",
+            client._session,
+            "get",
             return_value=_make_response(200, json_data=mock_user_info),
         ) as mock_get:
             result = client.get_user_profile("test-user")
@@ -246,7 +260,8 @@ class TestGetUserProfile:
 class TestVote:
     def test_vote_up_success(self, client):
         with patch.object(
-            client._session, "post",
+            client._session,
+            "post",
             return_value=_make_response(200),
         ) as mock_post:
             result = client.vote_up("12345")
@@ -257,7 +272,8 @@ class TestVote:
 
     def test_vote_up_failure(self, client):
         with patch.object(
-            client._session, "post",
+            client._session,
+            "post",
             return_value=_make_response(403),
         ):
             result = client.vote_up("12345")
@@ -265,7 +281,8 @@ class TestVote:
 
     def test_vote_neutral(self, client):
         with patch.object(
-            client._session, "post",
+            client._session,
+            "post",
             return_value=_make_response(200),
         ):
             result = client.vote_neutral("12345")
@@ -273,7 +290,8 @@ class TestVote:
 
     def test_vote_network_error(self, client):
         with patch.object(
-            client._session, "post",
+            client._session,
+            "post",
             side_effect=requests.ConnectionError("timeout"),
         ):
             result = client.vote_up("12345")
@@ -286,28 +304,32 @@ class TestVote:
 class TestFollowQuestion:
     def test_follow_success(self, client):
         with patch.object(
-            client._session, "post",
+            client._session,
+            "post",
             return_value=_make_response(200),
         ):
             assert client.follow_question("99999") is True
 
     def test_follow_204(self, client):
         with patch.object(
-            client._session, "post",
+            client._session,
+            "post",
             return_value=_make_response(204),
         ):
             assert client.follow_question("99999") is True
 
     def test_unfollow_success(self, client):
         with patch.object(
-            client._session, "delete",
+            client._session,
+            "delete",
             return_value=_make_response(200),
         ):
             assert client.unfollow_question("99999") is True
 
     def test_follow_network_error(self, client):
         with patch.object(
-            client._session, "post",
+            client._session,
+            "post",
             side_effect=requests.ConnectionError("err"),
         ):
             assert client.follow_question("99999") is False
@@ -320,7 +342,8 @@ class TestGetFeed:
     def test_returns_dict(self, client):
         feed_data = {"data": [{"type": "answer"}]}
         with patch.object(
-            client._session, "get",
+            client._session,
+            "get",
             return_value=_make_response(200, json_data=feed_data),
         ):
             result = client.get_feed(limit=5)
@@ -329,7 +352,8 @@ class TestGetFeed:
 
     def test_wraps_list_result(self, client):
         with patch.object(
-            client._session, "get",
+            client._session,
+            "get",
             return_value=_make_response(200, json_data=[{"type": "answer"}]),
         ):
             result = client.get_feed()
@@ -343,7 +367,8 @@ class TestGetFeed:
 class TestGetCollections:
     def test_raises_when_no_url_token(self, client):
         with patch.object(
-            client._session, "get",
+            client._session,
+            "get",
             return_value=_make_response(200, json_data={}),
         ):
             with pytest.raises(LoginError):
@@ -373,7 +398,8 @@ class TestCreateQuestion:
     def test_success(self, client):
         resp_data = {"id": 123456}
         with patch.object(
-            client._session, "post",
+            client._session,
+            "post",
             return_value=_make_response(200, json_data=resp_data),
         ) as mock_post:
             result = client.create_question("Test question")
@@ -385,7 +411,8 @@ class TestCreateQuestion:
 
     def test_with_detail_and_topics(self, client):
         with patch.object(
-            client._session, "post",
+            client._session,
+            "post",
             return_value=_make_response(201, json_data={"id": 789}),
         ) as mock_post:
             result = client.create_question("Q", detail="Detail", topic_ids=["1", "2"])
@@ -396,7 +423,8 @@ class TestCreateQuestion:
 
     def test_401_raises_login_error(self, client):
         with patch.object(
-            client._session, "post",
+            client._session,
+            "post",
             return_value=_make_response(401),
         ):
             with pytest.raises(LoginError):
@@ -404,7 +432,8 @@ class TestCreateQuestion:
 
     def test_failure_status(self, client):
         with patch.object(
-            client._session, "post",
+            client._session,
+            "post",
             return_value=_make_response(400, text="Bad Request"),
         ):
             with pytest.raises(DataFetchError):
@@ -412,7 +441,8 @@ class TestCreateQuestion:
 
     def test_network_error(self, client):
         with patch.object(
-            client._session, "post",
+            client._session,
+            "post",
             side_effect=requests.ConnectionError("err"),
         ):
             with pytest.raises(DataFetchError):
@@ -420,10 +450,13 @@ class TestCreateQuestion:
 
     def test_with_images_uses_content_publish(self, client):
         """Question with images routes through /content/publish."""
-        publish_resp = _make_response(200, json_data={
-            "code": 0,
-            "data": {"result": '{"id": "q999", "type": "question"}'},
-        })
+        publish_resp = _make_response(
+            200,
+            json_data={
+                "code": 0,
+                "data": {"result": '{"id": "q999", "type": "question"}'},
+            },
+        )
         image_info = {
             "src": "https://pic-private.zhihu.com/v2-abc~q75.jpg?auth=x",
             "original_src": "https://pic-private.zhihu.com/v2-abc~q75.jpg?auth=y",
@@ -431,11 +464,13 @@ class TestCreateQuestion:
             "watermark_src": "",
         }
         with patch.object(
-            client._session, "post",
+            client._session,
+            "post",
             return_value=publish_resp,
         ) as mock_post:
             result = client.create_question(
-                "Title?", detail="Desc",
+                "Title?",
+                detail="Desc",
                 image_infos=[image_info],
             )
             assert result["id"] == "q999"
@@ -454,12 +489,16 @@ class TestCreatePin:
     def test_success(self, client):
         """Pin without images uses content/publish: draft then publish with title + hybrid."""
         draft_resp = _make_response(200, json_data={"data": {"content_id": "draft_pin_1"}})
-        publish_resp = _make_response(200, json_data={
-            "code": 0,
-            "data": {"result": '{"id": 999, "type": "pin"}'},
-        })
+        publish_resp = _make_response(
+            200,
+            json_data={
+                "code": 0,
+                "data": {"result": '{"id": 999, "type": "pin"}'},
+            },
+        )
         with patch.object(
-            client._session, "post",
+            client._session,
+            "post",
             side_effect=[draft_resp, publish_resp],
         ) as mock_post:
             result = client.create_pin("Hello world", "Some content")
@@ -476,12 +515,16 @@ class TestCreatePin:
 
     def test_success_title_only(self, client):
         draft_resp = _make_response(200, json_data={"data": {"content_id": "d1"}})
-        publish_resp = _make_response(200, json_data={
-            "code": 0,
-            "data": {"result": '{"id": 111, "type": "pin"}'},
-        })
+        publish_resp = _make_response(
+            200,
+            json_data={
+                "code": 0,
+                "data": {"result": '{"id": 111, "type": "pin"}'},
+            },
+        )
         with patch.object(
-            client._session, "post",
+            client._session,
+            "post",
             side_effect=[draft_resp, publish_resp],
         ):
             result = client.create_pin("Pin text", "")
@@ -489,7 +532,8 @@ class TestCreatePin:
 
     def test_401_raises_login_error(self, client):
         with patch.object(
-            client._session, "post",
+            client._session,
+            "post",
             return_value=_make_response(401),
         ):
             with pytest.raises(LoginError):
@@ -499,7 +543,8 @@ class TestCreatePin:
         draft_resp = _make_response(200, json_data={"data": {"content_id": "d1"}})
         fail_resp = _make_response(403, text="Forbidden")
         with patch.object(
-            client._session, "post",
+            client._session,
+            "post",
             side_effect=[draft_resp, fail_resp],
         ):
             with pytest.raises(DataFetchError):
@@ -507,7 +552,8 @@ class TestCreatePin:
 
     def test_network_error(self, client):
         with patch.object(
-            client._session, "post",
+            client._session,
+            "post",
             side_effect=requests.ConnectionError("err"),
         ):
             with pytest.raises(DataFetchError):
@@ -529,15 +575,18 @@ class TestCreateArticle:
             call_count += 1
             return draft_resp
 
-        with patch.object(client._session, "post", side_effect=post_side_effect), \
-             patch.object(client._session, "patch", return_value=patch_resp), \
-             patch.object(client._session, "put", return_value=publish_resp):
+        with (
+            patch.object(client._session, "post", side_effect=post_side_effect),
+            patch.object(client._session, "patch", return_value=patch_resp),
+            patch.object(client._session, "put", return_value=publish_resp),
+        ):
             result = client.create_article("Title", "Body")
             assert result["id"] == "draft123"
 
     def test_draft_401_raises_login_error(self, client):
         with patch.object(
-            client._session, "post",
+            client._session,
+            "post",
             return_value=_make_response(401),
         ):
             with pytest.raises(LoginError):
@@ -545,7 +594,8 @@ class TestCreateArticle:
 
     def test_draft_failure(self, client):
         with patch.object(
-            client._session, "post",
+            client._session,
+            "post",
             return_value=_make_response(500, text="Server Error"),
         ):
             with pytest.raises(DataFetchError):
@@ -553,7 +603,8 @@ class TestCreateArticle:
 
     def test_draft_network_error(self, client):
         with patch.object(
-            client._session, "post",
+            client._session,
+            "post",
             side_effect=requests.ConnectionError("err"),
         ):
             with pytest.raises(DataFetchError):
@@ -562,8 +613,10 @@ class TestCreateArticle:
     def test_patch_failure(self, client):
         draft_resp = _make_response(200, json_data={"id": "d1"})
         patch_resp = _make_response(500, text="err")
-        with patch.object(client._session, "post", return_value=draft_resp), \
-             patch.object(client._session, "patch", return_value=patch_resp):
+        with (
+            patch.object(client._session, "post", return_value=draft_resp),
+            patch.object(client._session, "patch", return_value=patch_resp),
+        ):
             with pytest.raises(DataFetchError):
                 client.create_article("T", "C")
 
@@ -571,21 +624,29 @@ class TestCreateArticle:
         draft_resp = _make_response(200, json_data={"id": "d1"})
         patch_resp = _make_response(200)
         publish_resp = _make_response(500, text="err")
-        with patch.object(client._session, "post", return_value=draft_resp), \
-             patch.object(client._session, "patch", return_value=patch_resp), \
-             patch.object(client._session, "put", return_value=publish_resp):
+        with (
+            patch.object(client._session, "post", return_value=draft_resp),
+            patch.object(client._session, "patch", return_value=patch_resp),
+            patch.object(client._session, "put", return_value=publish_resp),
+        ):
             with pytest.raises(DataFetchError):
                 client.create_article("T", "C")
 
     def test_with_images_uses_content_publish(self, client):
         """Article with images routes through /content/publish."""
-        draft_resp = _make_response(200, json_data={
-            "data": {"content_id": "draft_a1"},
-        })
-        publish_resp = _make_response(200, json_data={
-            "code": 0,
-            "data": {"result": '{"id": "art_img", "type": "article"}'},
-        })
+        draft_resp = _make_response(
+            200,
+            json_data={
+                "data": {"content_id": "draft_a1"},
+            },
+        )
+        publish_resp = _make_response(
+            200,
+            json_data={
+                "code": 0,
+                "data": {"result": '{"id": "art_img", "type": "article"}'},
+            },
+        )
         image_info = {
             "src": "https://pic-private.zhihu.com/v2-xyz~q75.jpg?auth=x",
             "original_src": "https://pic-private.zhihu.com/v2-xyz~q75.jpg?auth=y",
@@ -593,11 +654,13 @@ class TestCreateArticle:
             "watermark_src": "",
         }
         with patch.object(
-            client._session, "post",
+            client._session,
+            "post",
             side_effect=[draft_resp, publish_resp],
         ) as mock_post:
             result = client.create_article(
-                "Title", "<p>Body</p>",
+                "Title",
+                "<p>Body</p>",
                 image_infos=[image_info],
             )
             assert result["id"] == "art_img"
@@ -616,31 +679,41 @@ class TestCreateArticle:
 
 class TestUploadImage:
     def _poll_response(self):
-        return _make_response(200, json_data={
-            "status": "success",
-            "src": "https://pic-private.zhihu.com/v2-abc123~q75.jpg?auth=x",
-            "original_src": "https://pic-private.zhihu.com/v2-abc123~q75.jpg?auth=y",
-            "watermark": "watermark",
-            "watermark_src": "https://pic-private.zhihu.com/v2-wm~q75.jpg?auth=z",
-        })
+        return _make_response(
+            200,
+            json_data={
+                "status": "success",
+                "src": "https://pic-private.zhihu.com/v2-abc123~q75.jpg?auth=x",
+                "original_src": "https://pic-private.zhihu.com/v2-abc123~q75.jpg?auth=y",
+                "watermark": "watermark",
+                "watermark_src": "https://pic-private.zhihu.com/v2-wm~q75.jpg?auth=z",
+            },
+        )
 
     def test_success_state_2(self, client, tmp_path):
         """Image not yet on server — full upload flow."""
         img_file = tmp_path / "test.jpg"
-        img_file.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 100)
+        Image.new("RGB", (2, 2)).save(img_file)
 
-        register_resp = _make_response(200, json_data={
-            "upload_file": {"image_id": "123", "object_key": "v2-abc123", "state": 2},
-            "upload_token": {
-                "access_key": "ak", "access_id": "aid", "access_token": "at",
+        register_resp = _make_response(
+            200,
+            json_data={
+                "upload_file": {"image_id": "123", "object_key": "v2-abc123", "state": 2},
+                "upload_token": {
+                    "access_key": "ak",
+                    "access_id": "aid",
+                    "access_token": "at",
+                },
             },
-        })
+        )
         oss_resp = _make_response(200)
         poll_resp = self._poll_response()
 
-        with patch.object(client._session, "post", return_value=register_resp), \
-             patch.object(client._session, "get", return_value=poll_resp), \
-             patch("requests.put", return_value=oss_resp) as mock_oss:
+        with (
+            patch.object(client._session, "post", return_value=register_resp),
+            patch.object(client._session, "get", return_value=poll_resp),
+            patch("requests.put", return_value=oss_resp) as mock_oss,
+        ):
             result = client.upload_image(str(img_file))
             assert isinstance(result, dict)
             assert "pic-private.zhihu.com" in result["src"]
@@ -649,16 +722,21 @@ class TestUploadImage:
     def test_success_state_1(self, client, tmp_path):
         """Image already exists — no OSS upload needed."""
         img_file = tmp_path / "test.jpg"
-        img_file.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 100)
+        Image.new("RGB", (2, 2)).save(img_file)
 
-        register_resp = _make_response(200, json_data={
-            "upload_file": {"image_id": "456", "state": 1},
-        })
+        register_resp = _make_response(
+            200,
+            json_data={
+                "upload_file": {"image_id": "456", "state": 1},
+            },
+        )
         poll_resp = self._poll_response()
 
-        with patch.object(client._session, "post", return_value=register_resp), \
-             patch.object(client._session, "get", return_value=poll_resp), \
-             patch("requests.put") as mock_oss:
+        with (
+            patch.object(client._session, "post", return_value=register_resp),
+            patch.object(client._session, "get", return_value=poll_resp),
+            patch("requests.put") as mock_oss,
+        ):
             result = client.upload_image(str(img_file))
             assert isinstance(result, dict)
             assert "src" in result
@@ -670,9 +748,10 @@ class TestUploadImage:
 
     def test_register_failure(self, client, tmp_path):
         img_file = tmp_path / "test.jpg"
-        img_file.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 100)
+        Image.new("RGB", (2, 2)).save(img_file)
         with patch.object(
-            client._session, "post",
+            client._session,
+            "post",
             return_value=_make_response(500, text="err"),
         ):
             with pytest.raises(DataFetchError):
@@ -680,23 +759,31 @@ class TestUploadImage:
 
     def test_oss_upload_failure(self, client, tmp_path):
         img_file = tmp_path / "test.jpg"
-        img_file.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 100)
-        register_resp = _make_response(200, json_data={
-            "upload_file": {"image_id": "123", "object_key": "v2-abc", "state": 2},
-            "upload_token": {
-                "access_key": "ak", "access_id": "aid", "access_token": "at",
+        Image.new("RGB", (2, 2)).save(img_file)
+        register_resp = _make_response(
+            200,
+            json_data={
+                "upload_file": {"image_id": "123", "object_key": "v2-abc", "state": 2},
+                "upload_token": {
+                    "access_key": "ak",
+                    "access_id": "aid",
+                    "access_token": "at",
+                },
             },
-        })
-        with patch.object(client._session, "post", return_value=register_resp), \
-             patch("requests.put", return_value=_make_response(403, text="Forbidden")):
+        )
+        with (
+            patch.object(client._session, "post", return_value=register_resp),
+            patch("requests.put", return_value=_make_response(403, text="Forbidden")),
+        ):
             with pytest.raises(DataFetchError, match="OSS upload"):
                 client.upload_image(str(img_file))
 
     def test_network_error(self, client, tmp_path):
         img_file = tmp_path / "test.jpg"
-        img_file.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 100)
+        Image.new("RGB", (2, 2)).save(img_file)
         with patch.object(
-            client._session, "post",
+            client._session,
+            "post",
             side_effect=requests.ConnectionError("err"),
         ):
             with pytest.raises(DataFetchError):
@@ -715,16 +802,23 @@ class TestCreatePinWithImages:
     }
 
     def test_with_images_uses_content_publish(self, client):
-        """Pin with images uses /content/publish endpoint; payload has title + hybrid like question."""
-        draft_resp = _make_response(200, json_data={
-            "data": {"content_id": "draft_p1"},
-        })
-        publish_resp = _make_response(200, json_data={
-            "code": 0,
-            "data": {"result": '{"id": "pin123", "type": "pin"}'},
-        })
+        """Pin with images uses content/publish with title and hybrid fields."""
+        draft_resp = _make_response(
+            200,
+            json_data={
+                "data": {"content_id": "draft_p1"},
+            },
+        )
+        publish_resp = _make_response(
+            200,
+            json_data={
+                "code": 0,
+                "data": {"result": '{"id": "pin123", "type": "pin"}'},
+            },
+        )
         with patch.object(
-            client._session, "post",
+            client._session,
+            "post",
             side_effect=[draft_resp, publish_resp],
         ) as mock_post:
             result = client.create_pin("My title", "Body content", image_infos=[self._SAMPLE_INFO])
@@ -742,12 +836,16 @@ class TestCreatePinWithImages:
     def test_without_images_uses_content_publish(self, client):
         """Pin without images uses content/publish (draft + publish), no media."""
         draft_resp = _make_response(200, json_data={"data": {"content_id": "draft_1"}})
-        publish_resp = _make_response(200, json_data={
-            "code": 0,
-            "data": {"result": '{"id": 999, "type": "pin"}'},
-        })
+        publish_resp = _make_response(
+            200,
+            json_data={
+                "code": 0,
+                "data": {"result": '{"id": 999, "type": "pin"}'},
+            },
+        )
         with patch.object(
-            client._session, "post",
+            client._session,
+            "post",
             side_effect=[draft_resp, publish_resp],
         ) as mock_post:
             result = client.create_pin("text", "")
@@ -761,19 +859,24 @@ class TestCreatePinWithImages:
 
     def test_with_images_401(self, client):
         with patch.object(
-            client._session, "post",
+            client._session,
+            "post",
             return_value=_make_response(401),
         ):
             with pytest.raises(LoginError):
                 client.create_pin("text", "", image_infos=[self._SAMPLE_INFO])
 
     def test_with_images_failure(self, client):
-        draft_resp = _make_response(200, json_data={
-            "data": {"content_id": "draft_p2"},
-        })
+        draft_resp = _make_response(
+            200,
+            json_data={
+                "data": {"content_id": "draft_p2"},
+            },
+        )
         publish_resp = _make_response(500, text="err")
         with patch.object(
-            client._session, "post",
+            client._session,
+            "post",
             side_effect=[draft_resp, publish_resp],
         ):
             with pytest.raises(DataFetchError):

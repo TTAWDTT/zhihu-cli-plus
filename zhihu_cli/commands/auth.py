@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+from contextlib import redirect_stdout
 
 import click
 from click.core import ParameterSource
@@ -20,15 +21,14 @@ from ..config import REQUIRED_COOKIES
 from ..display import (
     console,
     format_count,
-    format_stats_line,
     make_kv_table,
     print_error,
     print_hint,
-    print_info,
     print_success,
     print_warning,
     strip_html,
 )
+from ..exceptions import LoginError
 
 
 def _verify_cookies(cookie_dict: dict) -> bool | None:
@@ -41,6 +41,8 @@ def _verify_cookies(cookie_dict: dict) -> bool | None:
     try:
         with ZhihuClient(cookie_dict) as client:
             info = client.get_self_info()
+    except LoginError as error:
+        return False if error.status_code == 401 else None
     except Exception:
         return None
 
@@ -59,8 +61,9 @@ def _verify_cookies(cookie_dict: dict) -> bool | None:
 @click.command()
 @click.option("--qrcode", is_flag=True, help="Use QR code to login")
 @click.option("--cookie", "cookie_str", default=None, help="Provide cookie string directly")
+@click.option("--json", "as_json", is_flag=True, help="Output JSON")
 @click.pass_context
-def login(ctx: click.Context, qrcode: bool, cookie_str: str | None):
+def login(ctx: click.Context, qrcode: bool, cookie_str: str | None, as_json: bool):
     """Authenticate with Zhihu.
 
     \b
@@ -68,17 +71,21 @@ def login(ctx: click.Context, qrcode: bool, cookie_str: str | None):
       --qrcode   Scan QR code with Zhihu app (recommended)
       --cookie   Paste cookie string (must contain z_c0, _xsrf, d_c0)
     """
-    cookie_provided = (
-        ctx.get_parameter_source("cookie_str") == ParameterSource.COMMANDLINE
-    )
+    cookie_provided = ctx.get_parameter_source("cookie_str") == ParameterSource.COMMANDLINE
 
     if cookie_provided:
         parsed = cookie_str_to_dict(cookie_str or "")
-        if not REQUIRED_COOKIES.issubset(parsed.keys()):
-            print_error("Invalid cookie — must contain [bold]z_c0[/bold], [bold]_xsrf[/bold], [bold]d_c0[/bold]")
+        if not all(parsed.get(key, "").strip() for key in REQUIRED_COOKIES):
+            print_error(
+                "Invalid cookie — must contain [bold]z_c0[/bold], "
+                "[bold]_xsrf[/bold], [bold]d_c0[/bold]"
+            )
             sys.exit(1)
         save_cookies("; ".join(f"{k}={v}" for k, v in parsed.items()))
-        print_success("Cookie saved")
+        if as_json:
+            click.echo(json.dumps({"saved": True, "verified": None}))
+        else:
+            print_success("Cookie saved")
         return
 
     if not qrcode:
@@ -87,35 +94,51 @@ def login(ctx: click.Context, qrcode: bool, cookie_str: str | None):
             cookie_dict = cookie_str_to_dict(cookie)
             verify_result = _verify_cookies(cookie_dict)
             if verify_result is True:
-                print_success("Already authenticated (saved cookie)")
+                if as_json:
+                    click.echo(json.dumps({"saved": True, "verified": True}))
+                else:
+                    print_success("Already authenticated (saved cookie)")
                 return
             elif verify_result is False:
                 print_warning("Saved cookie expired or invalid")
                 clear_cookies()
             else:
                 print_warning("Cannot verify cookie — keeping existing session")
+                if as_json:
+                    click.echo(json.dumps({"saved": True, "verified": None}))
                 return
 
     # QR code login
-    print_info("Launching QR code login…")
+    click.echo("Launching QR code login…", err=True)
     try:
-        cookie = qrcode_login()
+        if as_json:
+            with redirect_stdout(sys.stderr):
+                cookie = qrcode_login()
+        else:
+            cookie = qrcode_login()
         cookie_dict = cookie_str_to_dict(cookie)
         verify_result = _verify_cookies(cookie_dict)
         if verify_result is False:
             clear_cookies()
             print_error("Login completed but session is invalid — please retry")
             sys.exit(1)
-        print_success("Login successful — cookie saved")
+        if as_json:
+            click.echo(json.dumps({"saved": True, "verified": verify_result}))
+        else:
+            print_success("Login successful — cookie saved")
     except Exception as e:
         print_error(f"Login failed: {e}")
         sys.exit(1)
 
 
 @click.command()
-def logout():
+@click.option("--json", "as_json", is_flag=True, help="Output JSON")
+def logout(as_json: bool):
     """Clear saved credentials."""
     removed = clear_cookies()
+    if as_json:
+        click.echo(json.dumps({"success": True, "removed": removed}))
+        return
     if removed:
         print_success(f"Logged out — removed: {', '.join(removed)}")
     else:
@@ -123,9 +146,17 @@ def logout():
 
 
 @click.command()
-def status():
+@click.option("--json", "as_json", is_flag=True, help="Output JSON")
+def status(as_json: bool):
     """Check authentication status (offline)."""
     cookie = get_saved_cookie_string()
+    if as_json:
+        click.echo(
+            json.dumps({"authenticated": bool(cookie), "verified": False, "source": "local"})
+        )
+        if not cookie:
+            sys.exit(1)
+        return
     if not cookie:
         print_error("Not authenticated")
         print_hint("Run [bold]zhihu login --qrcode[/bold] or [bold]zhihu login --cookie[/bold]")

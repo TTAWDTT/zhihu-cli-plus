@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-from io import StringIO
-
-from rich.console import Console
 from rich.table import Table
 
 from zhihu_cli.display import (
@@ -16,7 +13,6 @@ from zhihu_cli.display import (
     strip_html,
     truncate,
 )
-
 
 # ── strip_html ─────────────────────────────────────────────────────────────────
 
@@ -47,7 +43,7 @@ class TestStripHtml:
         assert strip_html("  <p> padded </p>  ") == "padded"
 
     def test_self_closing_tags(self):
-        assert strip_html("line1<br/>line2") == "line1line2"
+        assert strip_html("line1<br/>line2") == "line1\nline2"
 
 
 # ── format_count ───────────────────────────────────────────────────────────────
