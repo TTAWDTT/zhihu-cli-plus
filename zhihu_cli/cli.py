@@ -35,10 +35,10 @@ def _setup_logging(verbose: bool):
 
 
 @click.group()
-@click.version_option(version=__version__, prog_name="zhihu-cli")
+@click.version_option(version=__version__, prog_name="zhihu-cli-plus")
 @click.option("-v", "--verbose", is_flag=True, help="Enable debug logging")
 def cli(verbose: bool):
-    """zhihu-cli — Zhihu from your terminal."""
+    """zhihu-cli-plus — Zhihu from your terminal."""
     _setup_logging(verbose)
 
 

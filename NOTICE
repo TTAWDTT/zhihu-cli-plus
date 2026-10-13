@@ -1,0 +1,12 @@
+zhihu-cli-plus
+
+This project is derived from BAIGUANGMEI/zhihu-cli:
+https://github.com/BAIGUANGMEI/zhihu-cli
+
+The original authorship, Git commit history and Apache License 2.0 are retained.
+The Plus maintainers have modified the authentication, HTTP client, command
+output, pagination, content publication and comment interactions, and added
+regression and opt-in live tests. Plus releases are maintained separately.
+
+The signing implementation includes MIT-licensed reference material.
+Its attribution and full license are retained in zhihu_cli/signing.py.

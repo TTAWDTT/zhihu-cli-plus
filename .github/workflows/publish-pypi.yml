@@ -1,0 +1,67 @@
+name: Publish verified release to PyPI
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published GitHub Release tag to upload to PyPI
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pypi-publish-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Validate tag input
+        run: |
+          python - <<'PY'
+          import os, re
+          assert re.fullmatch(r"v\d+\.\d+\.\d+", os.environ["RELEASE_TAG"]), "Use a version tag"
+          PY
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Download published distributions
+        run: |
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir dist \
+            --pattern '*.whl' --pattern '*.tar.gz' --pattern SHA256SUMS
+      - name: Validate checksums and package identity
+        run: |
+          python - <<'PY'
+          import email, hashlib, os, shutil, zipfile
+          from pathlib import Path
+          version = os.environ["RELEASE_TAG"][1:]
+          expected = {f"zhihu_cli_plus-{version}-py3-none-any.whl", f"zhihu_cli_plus-{version}.tar.gz"}
+          rows = [line.split("  ", 1) for line in Path("dist/SHA256SUMS").read_text().splitlines()]
+          assert len(rows) == 2 and {name for _, name in rows} == expected
+          for digest, name in rows:
+              assert hashlib.sha256(Path("dist", name).read_bytes()).hexdigest() == digest
+          wheel = Path("dist", f"zhihu_cli_plus-{version}-py3-none-any.whl")
+          with zipfile.ZipFile(wheel) as archive:
+              metadata = email.message_from_bytes(archive.read(f"zhihu_cli_plus-{version}.dist-info/METADATA"))
+              assert metadata["Name"] == "zhihu-cli-plus" and metadata["Version"] == version
+          Path("publish-dist").mkdir()
+          for name in expected:
+              shutil.copy2(Path("dist", name), Path("publish-dist", name))
+          PY
+          python -m pip install twine
+          python -m twine check dist/*.whl dist/*.tar.gz
+      - name: Publish with PyPI Trusted Publishing
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
+        with:
+          packages-dir: publish-dist/

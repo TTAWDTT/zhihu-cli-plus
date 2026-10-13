@@ -37,7 +37,7 @@ error_console = Console(theme=ZHIHU_THEME, stderr=True)
 
 # ── Brand ──────────────────────────────────────────────────────────────────────
 
-BRAND = "[bold blue]zhihu[/bold blue][bold white]-cli[/bold white]"
+BRAND = "[bold blue]zhihu[/bold blue][bold white]-cli-plus[/bold white]"
 SEPARATOR = "[dim]─" * 50 + "[/dim]"
 
 

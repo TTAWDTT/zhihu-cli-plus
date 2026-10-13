@@ -1,21 +1,22 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
-name = "pyzhihu-cli"
-version = "0.5.0"
-description = "知乎命令行工具 — 在终端搜索问题、查看回答、发布提问、发布想法、发布文章(图文混合，富文本支持)、浏览热榜，支持二维码登录与Cookie登录"
+name = "zhihu-cli-plus"
+version = "0.6.0"
+description = "知乎 CLI Plus：JSON、评论与回复、评论点赞、游标分页及签名请求"
 readme = "README.md"
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.10"
 authors = [{ name = "BAIGUANGMEI" }]
+maintainers = [{ name = "TTAWDTT" }]
 keywords = ["zhihu", "cli", "知乎"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -34,6 +35,7 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/TTAWDTT/zhihu-cli-plus"
 Repository = "https://github.com/TTAWDTT/zhihu-cli-plus"
+Changelog = "https://github.com/TTAWDTT/zhihu-cli-plus/blob/main/CHANGELOG.md"
 
 [project.scripts]
 zhihu = "zhihu_cli.cli:cli"
