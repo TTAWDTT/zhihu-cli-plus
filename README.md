@@ -20,7 +20,7 @@ stderr，失败返回非零退出码。`status --json` 仅判断本地 Cookie �
 ```bash
 # 回答与完整评论，JSON 不再忽略 --comments
 zhihu answer 123456 --comments --json
-# 独立评论查询；支持 answer / article / pin，保留 API 返回的作者与回复信息
+# 独立评论查询；支持 answer / article / pin / question，保留作者与回复信息
 zhihu comments 123456 --type answer --all --json
 zhihu comments 123456 --type article --order reverse --limit 20 --json
 # 推荐全文与评论；--all 翻推荐页，--all-comments 翻每条内容的评论页
@@ -70,6 +70,19 @@ zhihu topic 19550517 --questions --all --json
 `search` / `hot` 的 `--answers N` 在 JSON 和终端输出中行为一致；设为 0 可跳过额外查询。
 `feeds` 将回答、文章或想法详情补入 `target`，并把评论放入条目的 `comments`。
 这里的评论支持是读取：保留返回的嵌套回复，但不另行遍历未返回的子评论，也不发布评论。
+
+`comments` 读取评论，`comment` 发布评论。文章链接中的 `/p/` 后数字就是文章 ID，
+读取文章时需指定 `--type article`，例如：
+
+```bash
+zhihu comments 2093329704367428295 --type article --all
+zhihu comments 2093329704367428295 --type article --all --json
+```
+
+0.4.1 修复了 V5 根评论首页传入 `offset=0` 导致有评论却返回空列表的问题；
+默认首页及 `--offset 0` 自动使用空游标，后续游标原样保留。
+终端把作者和 ID 放在正文前，缩进显示接口已返回的子评论及其回复目标。
+子评论未全部显示时会提示 `zhihu replies 根评论ID --all`；`comments --all` 翻根评论页。
 
 本轮还修复了互动失败仍显示成功、离线状态检查联网、带图文章遗漏话题、
 HTML 正文重复包裹、想法正文长度计算不一致及图片上传固定 JPEG 类型的问题。

@@ -441,7 +441,9 @@ class ZhihuClient:
         return self._get(
             f"{ZHIHU_API_V4}/comment_v5/{resources[resource_type]}/{resource_id}/root_comment",
             params={
-                "offset": offset,
+                # V5 root comments use an empty initial cursor. Literal "0"
+                # can return an empty, non-terminal page even with comments.
+                "offset": "" if offset in (0, "0") else offset,
                 "limit": limit,
                 "order_by": "score" if order == "normal" else "ts",
             },
