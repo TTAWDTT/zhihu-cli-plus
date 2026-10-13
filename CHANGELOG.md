@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.0 (unreleased)
+
+- Add article/pin detail, user pins/questions/activities/collections and followed activity.
+- Add collection detail/items/content lookup, private-by-default creation, membership and deletion.
+- Add signed article/pin likes, user following and explicit notification read actions.
+- Add draft lists/version/detail/save, answer publication/editing and owned-answer deletion.
+- Add browsing history reads, explicit add/touch and confirmed clearing.
+- Preserve JSON, bounded cursor pagination, offline previews and one-attempt write semantics.
+- Validate owner/target/result identity; decode nested publish results and retain raw fields.
+- Upgrade known legacy member-list HTTP cursors to HTTPS without changing their opaque query.
+
 ## 0.6.0
 
 - Python distribution renamed from `pyzhihu-cli` to `zhihu-cli-plus`.

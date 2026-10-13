@@ -90,6 +90,8 @@ def _target(item):
         return item["object"]
     if "target" in item:
         return item["target"]
+    if isinstance(item.get("content"), dict):
+        return item["content"]
     if "question" in item and "id" not in item:
         return item["question"]
     return item

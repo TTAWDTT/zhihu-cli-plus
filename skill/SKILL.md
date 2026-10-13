@@ -4,7 +4,7 @@ description: 使用 zhihu-cli-plus 查询知乎内容、评论和回复，并按
 metadata:
   maintainer: TTAWDTT
   upstream-author: BAIGUANGMEI
-  version: "0.6.0"
+  version: "0.7.0"
 ---
 
 # zhihu-cli-plus
@@ -50,6 +50,12 @@ zhihu --version
 评论的 `id`、`reply_comment_id`、`reply_root_comment_id` 分别代表自身、直接回复目标和根评论；列表序号不是评论 ID。
 
 ## 发布与互动
+
+0.7 工作流命令：`article-detail`、`pin-detail`、`user-pins`、`user-questions`、`user-activities`、`user-collections`、`follow-feed`、`collection-detail`、`collection-items`、`content-collections`、`drafts`、`draft-versions`、`draft-detail`、`history`、`notification-list` 都是查询，使用 `--json`。
+
+`create-collection`、`collect [--undo]`、`delete-collection`、`like-article`、`like-pin`、`follow-user`、`save-draft`、`publish-answer`、`edit-answer`、`delete-answer`、`history-add`、`history-touch`、`history-clear`、`notifications-read` 是写操作，先核对目标与指令，必要时使用 `--dry-run --json`。`history` 和普通查询不会自动写历史。
+
+`save-draft --type answer` 使用问题 ID；默认新建，更新已有草稿必须加 `--update`。`edit-answer` 使用回答 ID。批量标记已读、清空历史、删除既有资源不能作为无授权的测试步骤。
 
 按用户指令选择目标和操作。新增功能或模拟测试不代表允许对任意真实评论发布或点赞；实测先确定具体目标、操作和恢复方式。
 `--dry-run` 可用于评论、回复、删除评论和评论点赞的离线请求预览，不读取 Cookie、不联网。

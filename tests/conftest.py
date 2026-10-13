@@ -103,6 +103,11 @@ def no_live_network(monkeypatch, request):
     if request.node.get_closest_marker("integration"):
         if not request.config.getoption("--live"):
             pytest.skip("Explicit --live is required for online tests")
+        if request.node.get_closest_marker("integration_workflow_write"):
+            from tests.test_live_workflow_write import enable_guard
+
+            enable_guard(monkeypatch, request)
+            return
         if request.node.get_closest_marker("integration_like"):
             _enable_comment_like_test(monkeypatch, request)
             return
@@ -250,3 +255,16 @@ def pytest_addoption(parser):
         "--live-like", action="store_true", help="Allow one approved comment like and restoration"
     )
     parser.addoption("--live-like-comment-id", help="Exact comment approved for the like test")
+    parser.addoption(
+        "--live-workflow-write",
+        action="store_true",
+        help="Enable an explicitly approved workflow lifecycle",
+    )
+    parser.addoption("--live-workflow-article-id", help="Owned article approved for testing")
+    parser.addoption("--live-workflow-pin-id", help="Owned pin approved for testing")
+    parser.addoption(
+        "--live-workflow-question-id", help="Owned question approved for temporary answer testing"
+    )
+    parser.addoption(
+        "--live-workflow-marker", help="Marker shown in the approved temporary content"
+    )

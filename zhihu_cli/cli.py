@@ -23,6 +23,7 @@ from .commands.interact import (
     vote,
 )
 from .commands.user import followers, following, user, user_answers, user_articles
+from .commands.workflows import WORKFLOW_COMMANDS
 
 
 def _setup_logging(verbose: bool):
@@ -83,6 +84,8 @@ cli.add_command(comment_detail)
 cli.add_command(replies)
 cli.add_command(delete_comment)
 cli.add_command(like_comment)
+for workflow_command in WORKFLOW_COMMANDS:
+    cli.add_command(workflow_command)
 
 
 if __name__ == "__main__":
