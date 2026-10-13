@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.7.0 (unreleased)
+## 0.7.0
 
 - Add article/pin detail, user pins/questions/activities/collections and followed activity.
 - Add collection detail/items/content lookup, private-by-default creation, membership and deletion.
