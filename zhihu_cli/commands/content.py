@@ -45,17 +45,39 @@ def _fail(message, error):
     sys.exit(1)
 
 
+def _show_comment(comment, label, indent="  ", root_id=None):
+    author = comment.get("author", {})
+    author = author.get("member", author).get("name", "Anonymous")
+    comment_id = comment.get("id", "")
+    console.print(f"{indent}{label}. {author}  ID: {comment_id}", markup=False)
+    reply_target = comment.get("reply_comment_id")
+    if reply_target and str(reply_target) != "0":
+        root_id = comment.get("reply_root_comment_id") or root_id or ""
+        console.print(f"{indent}   Root ID: {root_id}", markup=False)
+        console.print(f"{indent}   Reply target: {reply_target}", markup=False)
+    for line in strip_html(comment.get("content", "")).strip().splitlines():
+        console.print(f"{indent}   {line}", markup=False)
+    likes = comment.get("vote_count", comment.get("like_count", 0))
+    console.print(f"{indent}   {format_count(likes)} likes", markup=False)
+    console.print()
+
+
 def _show_comments(result):
     data = result.get("data", [])
     if not data:
         print_info("No comments")
     for i, comment in enumerate(data, 1):
-        author = comment.get("author", {})
-        author = author.get("member", author).get("name", "Anonymous")
-        console.print(f"  {i}. {author}: {strip_html(comment.get('content', ''))}", markup=False)
-        console.print(f"     ID: {comment.get('id', '')}", markup=False)
-        likes = comment.get("vote_count", comment.get("like_count", 0))
-        console.print(f"     {format_count(likes)} likes", markup=False)
+        _show_comment(comment, str(i))
+        children = comment.get("child_comments", [])
+        for j, child in enumerate(children, 1):
+            _show_comment(child, f"{i}.{j}", indent="      ", root_id=comment.get("id"))
+        if comment.get("child_comment_count", 0) > len(children):
+            console.print(
+                f"     Replies: {comment['child_comment_count']} ({len(children)} shown). "
+                f"Read all: zhihu replies {comment.get('id', '')} --all",
+                markup=False,
+            )
+            console.print()
 
 
 def _target(item):

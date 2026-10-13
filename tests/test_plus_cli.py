@@ -329,3 +329,46 @@ def test_v5_comment_metadata_and_like_count_survive_json_and_text(saved_cookies)
     assert json.loads(json_result.stdout) == response
     assert "7 likes" in text_result.stdout
     assert "Author" in text_result.stdout
+    assert "ID: 2" in text_result.stdout
+    assert "Child comment" in text_result.stdout
+
+
+def test_comment_text_groups_ids_bodies_and_reply_targets(saved_cookies):
+    response = {
+        "data": [
+            {
+                "id": "11596015299",
+                "author": {"name": "First author"},
+                "content": "<p>First body</p><p>Second paragraph [bold]literal[/bold]</p>",
+                "child_comment_count": 2,
+                "child_comments": [
+                    {
+                        "id": "11596135155",
+                        "author": {"name": "Reply author"},
+                        "content": "<p>Reply body</p>",
+                        "reply_root_comment_id": "11596015299",
+                        "reply_comment_id": "11596015299",
+                    }
+                ],
+            },
+            {
+                "id": "11595837033",
+                "author": {"name": "Second author"},
+                "content": "<p>Last body</p>",
+            },
+        ]
+    }
+    client = _make_mock_client(get_comments=response)
+    with patch("zhihu_cli.client.ZhihuClient", return_value=client):
+        result = CliRunner().invoke(cli, ["comments", "2093329704367428295", "-t", "article"])
+    assert result.exit_code == 0, result.output
+    text = result.stdout
+    first_id, child_id, last_id = [
+        text.index(f"ID: {i}") for i in ("11596015299", "11596135155", "11595837033")
+    ]
+    assert first_id < text.index("First body") < child_id
+    assert child_id < text.index("Reply body") < last_id < text.index("Last body")
+    assert "Root ID: 11596015299" in text
+    assert "Reply target: 11596015299" in text
+    assert "[bold]literal[/bold]" in text
+    assert "zhihu replies 11596015299 --all" in text

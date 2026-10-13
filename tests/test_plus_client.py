@@ -153,6 +153,33 @@ def test_comment_endpoint_and_cursor(client, kind, path):
         assert get.call_args.kwargs["params"]["order_by"] == "ts"
 
 
+@pytest.mark.parametrize("kind", ["article", "pin", "question"])
+@pytest.mark.parametrize("offset", [0, "0", ""])
+@pytest.mark.parametrize("order", ["normal", "reverse"])
+def test_v5_root_comments_start_with_empty_cursor(client, kind, offset, order):
+    # The real V5 service treats literal "0" as a cursor, not the first page.
+    expected = {"data": [{"id": "11596015299", "content": "Root body"}]}
+
+    def response(url, **kwargs):
+        data = expected if kwargs["params"]["offset"] == "" else {"data": []}
+        return _make_response(json_data=data)
+
+    with patch.object(client._session, "get", side_effect=response):
+        result = client.get_comments(
+            "2093329704367428295", resource_type=kind, offset=offset, order=order
+        )
+    assert result == expected
+
+
+def test_legacy_answer_and_child_reply_offsets_still_start_at_zero(client):
+    with patch.object(
+        client._session, "get", return_value=_make_response(json_data={"data": []})
+    ) as get:
+        client.get_comments("123")
+        client.get_comment_replies("456")
+    assert [call.kwargs["params"]["offset"] for call in get.call_args_list] == [0, 0]
+
+
 def test_api_version_and_web_platform_headers(client):
     prepared = client._session.prepare_request(
         requests.Request("GET", "https://www.zhihu.com/api/v4/me")

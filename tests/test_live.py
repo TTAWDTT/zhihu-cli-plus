@@ -136,10 +136,69 @@ def test_live_collection_json(command, live_context):
 def test_live_comment_json(kind, live_context):
     result = run_json(["comments", live_context[kind], "--type", kind, "--limit", "2"])
     check_collection(result)
+    if result.get("counts", {}).get("total_counts", 0) > 0:
+        assert len(result["data"]) > 0, "A nonempty comment thread must not pass as an empty list"
     for comment in result["data"]:
         assert bool(comment.get("id"))
         assert "content" in comment
         assert isinstance(comment.get("author"), dict)
+
+
+@pytest.mark.parametrize("order", ["normal", "reverse"])
+def test_live_reported_article_root_comment_pagination(order):
+    # User-reported regression: offset=0 gave data=[] despite counts=15.
+    result = run_json(
+        [
+            "comments",
+            "2093329704367428295",
+            "--type",
+            "article",
+            "--order",
+            order,
+            "--limit",
+            "2",
+            "--all",
+            "--max-pages",
+            "20",
+        ]
+    )
+    check_collection(result)
+    assert len(result["data"]) > 2
+    assert result["pages_fetched"] > 1
+    assert result["paging"]["is_end"] is True
+    ids = [str(comment["id"]) for comment in result["data"]]
+    assert len(ids) == len(set(ids))
+
+
+def test_live_reported_article_ids_match_root_and_reply_bodies(live_client):
+    roots = collect_pages(
+        live_client,
+        lambda: live_client.get_comments("2093329704367428295", "article", limit=2),
+        all_pages=True,
+        max_pages=20,
+    )["data"]
+    assert roots
+    checked_replies = 0
+    for root in roots:
+        root_id = str(root["id"])
+        detail = live_client.get_comment(root_id)
+        assert detail["content"] == root["content"]
+        if not root.get("child_comment_count"):
+            continue
+        replies = collect_pages(
+            live_client,
+            lambda root_id=root_id: live_client.get_comment_replies(root_id, limit=2),
+            all_pages=True,
+            max_pages=20,
+        )["data"]
+        assert replies
+        for reply in replies:
+            detail = live_client.get_comment(str(reply["id"]))
+            assert detail["content"] == reply["content"]
+            assert str(reply["reply_root_comment_id"]) == root_id
+            assert str(detail["reply_comment_id"]) == str(reply["reply_comment_id"])
+            checked_replies += 1
+    assert checked_replies > 0
 
 
 @pytest.mark.parametrize("kind", ["article", "pin"])
