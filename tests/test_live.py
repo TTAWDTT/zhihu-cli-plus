@@ -241,3 +241,33 @@ def test_live_aggregation_stops_at_page_bound(live_client, live_context):
 def test_live_guard_blocks_mutation_before_network(live_client):
     with pytest.raises(AssertionError, match="only allow GET"):
         live_client._session.post("https://www.zhihu.com/api/v4/content/publish", json={})
+
+
+def test_live_question_detail_preserves_full_schema(live_context):
+    result = run_json(["question", live_context["question"]])
+    assert str(result.get("id")) == live_context["question"]
+    assert isinstance(result.get("detail"), str)
+    assert isinstance(result.get("topics"), list)
+    assert isinstance(result.get("answer_count"), int)
+    assert isinstance(result.get("follower_count"), int)
+
+
+def test_live_question_detail_on_multiple_hot_questions(live_client):
+    hot = live_client.get_hot_list(limit=3)
+    ids = []
+    for item in hot.get("data", []):
+        target = item.get("target", item.get("question", item))
+        if target.get("id"):
+            ids.append(str(target["id"]))
+    assert len(set(ids)) >= 2
+    for question_id in dict.fromkeys(ids):
+        question = live_client.get_question(question_id)
+        assert str(question.get("id")) == question_id
+        assert bool(question.get("title"))
+        assert "detail" in question
+
+
+def test_live_question_text_output(live_context):
+    result = CliRunner().invoke(cli, ["question", live_context["question"]])
+    assert result.exit_code == 0, result.stderr
+    assert f"ID: {live_context['question']}" in result.stdout

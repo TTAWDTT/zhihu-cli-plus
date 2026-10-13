@@ -34,6 +34,7 @@ from .config import (
 )
 from .display import strip_html, to_html
 from .exceptions import DataFetchError, LoginError
+from .signing import sign_get_headers
 
 logger = logging.getLogger(__name__)
 
@@ -67,12 +68,17 @@ class ZhihuClient:
         self._session.close()
         logger.info("Session closed.")
 
-    def _get(self, url: str, params: dict | None = None) -> Any:
-        """Make a GET request and return JSON response."""
+    def _get_response(self, url: str, params: dict | None, *, signed: bool = False):
+        """Bound transient retries; recompute a signed request after cookie updates."""
         for attempt in range(3):
+            headers = self._get_signing_headers(url, params) if signed else {}
             try:
                 resp = self._session.get(
-                    url, params=params, timeout=DEFAULT_TIMEOUT, allow_redirects=False
+                    url,
+                    params=params,
+                    headers=headers,
+                    timeout=DEFAULT_TIMEOUT,
+                    allow_redirects=False,
                 )
             except requests.RequestException as e:
                 if attempt == 2:
@@ -87,14 +93,35 @@ class ZhihuClient:
                 delay = 0.5 * 2**attempt
             time.sleep(delay)
 
+        return resp
+
+    @staticmethod
+    def _api_error(response) -> dict:
+        try:
+            error = response.json().get("error", {})
+        except (ValueError, AttributeError):
+            return {}
+        return error if isinstance(error, dict) else {}
+
+    def _get(self, url: str, params: dict | None = None) -> Any:
+        """Read JSON, negotiating ZSE signing only for a parameter rejection.
+
+        Legacy endpoints may reject signing headers. Preserve their working
+        unsigned protocol; on 403/code 10003 try signing once, with bounded transient retries.
+        Login/permission failures never trigger this compatibility retry.
+        """
+        resp = self._get_response(url, params)
+        if (
+            resp.status_code == 403
+            and self._api_error(resp).get("code") == 10003
+            and self._get_signing_headers(url, params)
+        ):
+            resp = self._get_response(url, params, signed=True)
+
         if resp.status_code == 401:
             raise LoginError("Session expired or not logged in", status_code=401)
         if resp.status_code == 403:
-            try:
-                error = resp.json().get("error", {})
-            except (ValueError, AttributeError):
-                error = {}
-            if isinstance(error, dict) and error.get("code") == 10003:
+            if self._api_error(resp).get("code") == 10003:
                 raise DataFetchError(
                     "Zhihu rejected the client request parameters (403, code 10003)"
                 )
@@ -108,6 +135,24 @@ class ZhihuClient:
             return resp.json()
         except ValueError as e:
             raise DataFetchError(f"Invalid JSON response: {e}") from e
+
+    def _get_signing_headers(self, url: str, params: dict | None) -> dict[str, str]:
+        """Bind signatures to the encoded URL and cookie that requests will send."""
+        prepared = self._session.prepare_request(requests.Request("GET", url, params=params))
+        parsed = urlsplit(prepared.url)
+        if parsed.scheme != "https" or not (
+            (
+                parsed.hostname == "www.zhihu.com"
+                and parsed.path.startswith(("/api/v3/", "/api/v4/"))
+            )
+            or (parsed.hostname == "zhuanlan.zhihu.com" and parsed.path.startswith("/api/"))
+        ):
+            return {}
+        for fragment in prepared.headers.get("Cookie", "").split(";"):
+            name, _, value = fragment.strip().partition("=")
+            if name == "d_c0" and value:
+                return sign_get_headers(prepared.path_url, value)
+        return {}
 
     def get_next_page(self, url: str) -> dict:
         """Resume an API cursor without sending credentials to another host."""
