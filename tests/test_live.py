@@ -271,3 +271,75 @@ def test_live_question_text_output(live_context):
     result = CliRunner().invoke(cli, ["question", live_context["question"]])
     assert result.exit_code == 0, result.stderr
     assert f"ID: {live_context['question']}" in result.stdout
+
+
+@pytest.fixture()
+def live_comment_thread(live_client):
+    # Stable public article with a long comment conversation; this fixture only reads.
+    resource_id = "621012373"
+    result = live_client.get_comments(resource_id, resource_type="article", limit=2)
+    root = next(
+        (
+            comment
+            for comment in result.get("data", [])
+            if comment.get("child_comment_count", 0) > 4
+        ),
+        None,
+    )
+    if root is None:
+        pytest.fail("The public comment-thread fixture has no paginated replies")
+    return resource_id, str(root["id"])
+
+
+def test_live_v5_comment_detail_json(live_comment_thread):
+    _, root_id = live_comment_thread
+    result = run_json(["comment-detail", root_id])
+    assert str(result["id"]) == root_id
+    assert result["resource_type"] == "article"
+    assert "reply_comment_id" in result
+    assert str(result["reply_root_comment_id"]) == root_id
+
+
+def test_live_replies_and_cursor_json(live_comment_thread):
+    _, root_id = live_comment_thread
+    first = run_json(["replies", root_id, "--limit", "2"])
+    check_collection(first)
+    assert len(first["data"]) > 0
+    next_url = first["paging"]["next"]
+    second = run_json(["replies", root_id, "--next-url", next_url])
+    check_collection(second)
+    assert len(second["data"]) > 0
+    assert {str(c["id"]) for c in first["data"]}.isdisjoint({str(c["id"]) for c in second["data"]})
+
+
+def test_live_reply_to_a_child_is_only_previewed(live_client, live_comment_thread):
+    resource_id, root_id = live_comment_thread
+    children = live_client.get_comment_replies(root_id, limit=2)["data"]
+    child_id = str(children[0]["id"])
+    assert child_id != root_id
+    plan = run_json(
+        [
+            "reply",
+            resource_id,
+            child_id,
+            "--type",
+            "article",
+            "Dry-run verification only",
+            "--dry-run",
+        ]
+    )
+    assert plan["dry_run"] is True
+    assert plan["json"]["reply_comment_id"] == child_id
+    assert plan["reply_comment_id"] != root_id
+    assert "headers" not in plan
+
+
+def test_live_actual_comment_writer_is_blocked_from_sending(live_client, live_context):
+    with pytest.raises(AssertionError, match="only allow GET"):
+        live_client.create_comment(live_context["pin"], "Blocked test; never sent", "pin")
+
+
+def test_live_question_comment_read_json(live_context):
+    check_collection(
+        run_json(["comments", live_context["question"], "--type", "question", "--limit", "2"])
+    )

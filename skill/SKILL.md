@@ -1,8 +1,8 @@
 ---
 name: zhihu-cli
-description: "知乎 CLI (pyzhihu-cli)：搜索、热榜、问题/回答/评论、推荐 Feed、用户资料、发想法/提问/文章、删自己的内容、点赞关注、收藏与通知。Agent 代执行 zhihu 命令，Cookie 仅存本地。"
+description: "知乎 CLI (pyzhihu-cli)：搜索、热榜、问题/回答/评论、推荐 Feed、用户资料、发想法/提问/文章/评论及回复、删自己的内容、点赞关注、收藏与通知。Agent 代执行 zhihu 命令，Cookie 仅存本地。"
 author: BAIGUANGMEI
-version: "0.3.0"
+version: "0.4.0"
 tags:
   - zhihu
   - cli
@@ -125,6 +125,16 @@ Plus 尚未独立发布到 PyPI；应在本 fork 的源码目录和专用虚拟�
 - 2026-10-13：28 个只读线上用例全部通过；发布/删除仍使用模拟测试。
 - 线上测试：`pytest -m integration --live tests/test_live.py`，默认关闭，运行时只允许 GET。
 - 写入失败或返回缺失 ID 时不要盲目重试；先确认线上结果，避免重复发布。
+
+## 评论与回复写入（0.4）
+
+- 根评论：`zhihu comment <内容ID> "正文" --type answer/article/pin/question --json`。
+- 回复：`zhihu reply <内容ID> <实际目标评论ID> "正文" --type ... --json`，保留真正的子评论目标，不能改成根评论 ID。
+- 预览：添加 `--dry-run`，不会联网或发送；正文也可通过 `--file` 提供，`--html` 显式允许 HTML。
+- 查看：`comment-detail <评论ID> --json`；`replies <根评论ID> --all --json`。
+- 清理：`delete-comment <自己的评论ID> -y --json`；可以先 `--dry-run`。
+- 发评论/回复属于对外发消息，执行前需要用户明确授权目标和内容；开发功能不等于授权发送测试消息。
+- 发送只调用一次。网络异常、缺少 ID 或结果未知时先读回，不自动重复发送；审核与可见性状态按 API 原样保留。
 
 ## 常用示例
 

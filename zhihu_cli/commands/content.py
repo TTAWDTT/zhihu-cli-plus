@@ -53,6 +53,7 @@ def _show_comments(result):
         author = comment.get("author", {})
         author = author.get("member", author).get("name", "Anonymous")
         console.print(f"  {i}. {author}: {strip_html(comment.get('content', ''))}", markup=False)
+        console.print(f"     ID: {comment.get('id', '')}", markup=False)
         likes = comment.get("vote_count", comment.get("like_count", 0))
         console.print(f"     {format_count(likes)} likes", markup=False)
 
@@ -281,7 +282,7 @@ def answer(answer_id, as_json, with_comments, limit, **paging):
     "--type",
     "resource_type",
     default="answer",
-    type=click.Choice(["answer", "article", "pin"]),
+    type=click.Choice(["answer", "article", "pin", "question"]),
     show_default=True,
 )
 @click.option("--order", default="normal", type=click.Choice(["normal", "reverse"]))
@@ -289,7 +290,7 @@ def answer(answer_id, as_json, with_comments, limit, **paging):
 @click.option("--json", "as_json", is_flag=True)
 @pagination_options
 def comments(resource_id, resource_type, order, limit, as_json, **paging):
-    """Read comments on an answer, article, or pin."""
+    """Read comments on an answer, article, pin, or question."""
     with _get_client() as client:
         try:
             result = _fetch(

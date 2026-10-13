@@ -384,9 +384,18 @@ def sign_get_headers(path_and_query: str, d_c0: str) -> dict[str, str]:
     Preserve query encoding, order, and cookie quotes. Credential input and the
     intermediate signing source are deliberately kept out of errors and logs.
     """
+    return sign_request_headers(path_and_query, d_c0)
+
+
+def sign_request_headers(
+    path_and_query: str, d_c0: str, body: bytes | None = None
+) -> dict[str, str]:
+    """Sign the exact request body as UTF-8, without reserializing its JSON."""
     if not path_and_query.startswith("/") or not d_c0:
         raise ValueError("Signing requires a request path and a device cookie")
     source = "+".join((ZSE93, path_and_query, d_c0))
+    if body is not None:
+        source += "+" + body.decode("utf-8")
     digest = hashlib.md5(source.encode("utf-8")).hexdigest()
     return {
         "x-zse-93": ZSE93,
