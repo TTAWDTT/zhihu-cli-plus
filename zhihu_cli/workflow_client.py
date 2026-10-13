@@ -20,6 +20,16 @@ def _object(result, key):
     return nested if isinstance(nested, dict) else result
 
 
+def _server_message(result):
+    """Keep a bounded, printable server explanation without request diagnostics."""
+    if not isinstance(result, dict):
+        return ""
+    error = result.get("error")
+    value = error.get("message") if isinstance(error, dict) else None
+    value = value or result.get("message") or result.get("toast_message")
+    return "".join(c for c in value if c.isprintable())[:300] if isinstance(value, str) else ""
+
+
 def action_object(result):
     """Unwrap documented result objects without discarding the original response."""
     data = result.get("data") if isinstance(result.get("data"), dict) else result
@@ -262,9 +272,14 @@ class WorkflowClientMixin:
         if response.status_code == 401:
             raise LoginError("Session expired", status_code=401)
         if response.status_code not in (200, 201, 204):
-            code = self._api_error(response).get("code")
+            error = self._api_error(response)
+            code = error.get("code")
             suffix = f", code {code}" if code is not None else ""
-            raise DataFetchError(f"Operation rejected ({response.status_code}{suffix})")
+            reason = _server_message({"error": error})
+            raise DataFetchError(
+                f"Operation rejected ({response.status_code}{suffix})"
+                + (f": {reason}" if reason else "")
+            )
         if response.status_code == 204:
             result = {"success": True}
         else:
@@ -278,6 +293,13 @@ class WorkflowClientMixin:
             raise DataFetchError("Invalid response; read back before retrying")
         data = action_object(result)
         envelope = result.get("data") if isinstance(result.get("data"), dict) else {}
+        for wrapper in (result, envelope, data):
+            write = wrapper.get("write")
+            if isinstance(write, dict) and write.get("instruction") is True:
+                reason = _server_message({"message": write.get("msg")})
+                raise DataFetchError(
+                    "Server blocked publication" + (f": {reason}" if reason else "")
+                )
         if (
             result.get("error")
             or result.get("code", 0) not in (0, "0")
@@ -289,7 +311,10 @@ class WorkflowClientMixin:
             or data.get("error")
             or data.get("code", 0) not in (0, "0")
         ):
-            raise DataFetchError("Server rejected the operation")
+            reason = _server_message(result) or _server_message(envelope) or _server_message(data)
+            raise DataFetchError(
+                "Server rejected the operation" + (f": {reason}" if reason else "")
+            )
         confirmed = result.get("success") is True or data.get("success") is True
         if operation in ("like-article", "like-pin", "follow-user"):
             expected = not targets["undo"]
@@ -330,7 +355,11 @@ class WorkflowClientMixin:
                     raise DataFetchError("Unexpected edited answer ID; read back before retrying")
                 confirmed = True
             if operation == "answer-publish" and not returned_id:
-                raise DataFetchError("Published answer ID missing; result unknown")
+                reason = _server_message(result) or _server_message(envelope)
+                raise DataFetchError(
+                    "Published answer ID missing; result unknown"
+                    + (f": {reason}" if reason else "")
+                )
         if not confirmed:
             raise DataFetchError("Operation not confirmed; read back before retrying")
         receipt = {**result, "operation": operation, "targets": targets}

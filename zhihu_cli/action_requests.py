@@ -71,6 +71,11 @@ def build_collection_request(
     if action == "create":
         if not isinstance(title, str) or not title.strip():
             raise ValueError("Collection title cannot be empty")
+        # Match the web form's JavaScript string-length limits, including emoji.
+        if len(title.strip().encode("utf-16-le")) // 2 > 20:
+            raise ValueError("Collection title cannot exceed 20 characters")
+        if len(description.encode("utf-16-le")) // 2 > 60:
+            raise ValueError("Collection description cannot exceed 60 characters")
         return _plan(
             "collection-create",
             "POST",
@@ -227,7 +232,17 @@ def build_answer_publish_request(resource_id, content, *, edit=False, as_html=Fa
         "comment_permission": "all",
         "table_of_contents_enabled": False,
         "push_activity": True,
+        "columns": None,
+        "reward_setting": {"can_reward": False, "tagline": ""},
+        "disclaimer_status": "close",
+        "disclaimer_type": "none",
+        "commercial_report_info": {"is_report": False},
+        "commercial_zhitask_bind_info": None,
+        "is_report": False,
+        "thank_inviter_status": "close",
+        "thank_inviter": "",
     }
+    extra["include"] = "content,editable_content,question,author,review_info"
     extra["pc_business_params"] = json.dumps(settings, separators=(",", ":"))
     payload = {
         "action": "answer",
@@ -239,6 +254,13 @@ def build_answer_publish_request(resource_id, content, *, edit=False, as_html=Fa
             "hybrid": {"html": html, "textLength": len(strip_html(html))},
             "publishSwitch": {"draft_type": "normal"},
             "commentsPermission": {"comment_permission": "all"},
+            "reprint": {"reshipment_settings": "allowed"},
+            "appreciate": {"can_reward": False, "tagline": ""},
+            "creationStatement": {"disclaimer_status": "close", "disclaimer_type": "none"},
+            "commercialReportInfo": {"isReport": 0},
+            "toFollower": {},
+            "contentsTables": {"table_of_contents_enabled": False},
+            "thanksInvitation": {"thank_inviter_status": "close", "thank_inviter": ""},
         },
     }
     return _plan(

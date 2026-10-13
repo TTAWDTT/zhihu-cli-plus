@@ -31,6 +31,52 @@ def client():
 
 
 @pytest.mark.parametrize(
+    "title,description",
+    [("测" * 21, ""), ("😀" * 11, ""), ("Valid", "测" * 61), ("Valid", "😀" * 31)],
+)
+def test_collection_web_form_length_limits_fail_before_http(title, description):
+    with pytest.raises(ValueError, match="cannot exceed"):
+        build_collection_request("create", title=title, description=description)
+
+
+def test_collection_length_boundaries_match_web_utf16_counting():
+    plan = build_collection_request("create", title="😀" * 10, description="😀" * 30)
+    assert plan["json"]["title"] == "😀" * 10
+    assert plan["json"]["description"] == "😀" * 30
+
+
+@pytest.mark.parametrize("wrapper", ["root", "data", "result"])
+def test_publish_write_block_is_failure_even_with_an_id_and_success(client, wrapper):
+    payload = {"id": "456", "success": True, "write": {"instruction": True, "msg": "暂时无法发布"}}
+    result = payload if wrapper == "root" else {"data": payload}
+    if wrapper == "result":
+        result = {"code": 0, "data": {"result": json.dumps(payload)}}
+    with patch.object(client._session, "request", return_value=_make_response(200, result)) as send:
+        with pytest.raises(DataFetchError, match="Server blocked publication: 暂时无法发布"):
+            client.execute_action(build_answer_publish_request("123", "Text"))
+        send.assert_called_once()
+
+
+def test_server_rejection_explains_self_likes_without_retrying(client):
+    response = _make_response(403, {"error": {"code": 403, "message": "不能对自己的内容互动"}})
+    with patch.object(client._session, "request", return_value=response) as send:
+        with pytest.raises(DataFetchError, match="不能对自己的内容互动"):
+            client.execute_action(build_like_request("123", kind="article"))
+        send.assert_called_once()
+
+
+def test_publish_plan_contains_web_publication_components():
+    plan = build_answer_publish_request("123", "Text")
+    data = plan["json"]["data"]
+    assert data["extra_info"]["question_id"] == "123"
+    assert "content" in data["extra_info"]["include"]
+    assert data["hybrid"]["html"] == "<p>Text</p>"
+    assert data["appreciate"] == {"can_reward": False, "tagline": ""}
+    assert data["commercialReportInfo"] == {"isReport": 0}
+    assert data["contentsTables"] == {"table_of_contents_enabled": False}
+
+
+@pytest.mark.parametrize(
     "kind,segment", [("pins", "pins"), ("questions", "questions"), ("collections", "favlists")]
 )
 def test_user_collections_keep_token_and_numeric_offset(client, kind, segment):

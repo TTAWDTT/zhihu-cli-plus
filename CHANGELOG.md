@@ -10,6 +10,7 @@
 - Preserve JSON, bounded cursor pagination, offline previews and one-attempt write semantics.
 - Validate owner/target/result identity; decode nested publish results and retain raw fields.
 - Upgrade known legacy member-list HTTP cursors to HTTPS without changing their opaque query.
+- Enforce collection title/description web limits; report server rejection reasons and publication blocks.
 
 ## 0.6.0
 

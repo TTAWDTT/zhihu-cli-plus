@@ -41,7 +41,7 @@ class WriteGuard:
         self.pin = numeric_id(pin_id)
         self.question = numeric_id(question_id)
         self.marker = marker
-        self.title = f"zhihu-cli-plus 临时收藏（{marker}）"
+        self.title = f"cli测试-{marker.removeprefix('cli-plus-wave-')}"
         self.collection = None
         self.answer = None
         self.old_collections = set()
@@ -49,6 +49,8 @@ class WriteGuard:
         self.counts = collections.Counter()
         self.ready = False
         self.last = 0.0
+        self.allowed_steps = None
+        self.responses = []
 
     def bind(self, kind, resource_id):
         resource_id = numeric_id(resource_id)
@@ -109,12 +111,51 @@ class WriteGuard:
             elif method == "DELETE" and self.answer and path == f"/api/v4/answers/{self.answer}":
                 assert not query and body is None
                 key = "delete_answer"
-            if key is None or self.counts[key]:
+            if (
+                key is None
+                or self.counts[key]
+                or (self.allowed_steps is not None and key not in self.allowed_steps)
+            ):
                 raise AssertionError("An unrelated or repeated write was blocked before HTTP")
             self.counts[key] += 1
         time.sleep(max(0.0, 0.4 - (time.monotonic() - self.last)))
         self.last = time.monotonic()
         response = self.original(session, method, *args, **kwargs)
+        if key:
+            diagnostic = {"step": key, "status": response.status_code}
+            try:
+                raw = response.json()
+                diagnostic["keys"] = sorted(raw) if isinstance(raw, dict) else []
+                if isinstance(raw, dict):
+                    error = raw.get("error")
+                    if isinstance(error, dict):
+                        diagnostic["error"] = {
+                            k: error[k] for k in ("code", "message") if k in error
+                        }
+                    diagnostic.update(
+                        {k: raw[k] for k in ("success", "voting", "is_liked") if k in raw}
+                    )
+                    diagnostic.update(
+                        {k: raw[k] for k in ("code", "message", "toast_message") if k in raw}
+                    )
+                    data = raw.get("data")
+                    if isinstance(data, dict):
+                        diagnostic["data_keys"] = sorted(data)
+                        diagnostic["data_status"] = {
+                            k: data[k]
+                            for k in ("write", "publishType", "code", "message")
+                            if k in data
+                        }
+                        obj = action_object(raw)
+                        diagnostic["result_keys"] = sorted(obj)
+                        diagnostic["result_status"] = {
+                            k: obj[k]
+                            for k in ("id", "content_id", "code", "message", "error")
+                            if k in obj
+                        }
+            except (ValueError, DataFetchError):
+                diagnostic["json"] = False
+            self.responses.append(diagnostic)
         if key in ("create_collection", "publish_answer") and response.status_code in (200, 201):
             try:
                 data = action_object(response.json())
@@ -147,6 +188,22 @@ def enable_guard(monkeypatch, request):
         question_id=options[2],
         marker=options[3],
     )
+    scopes = {
+        "test_approved_collection_and_cleanup": {
+            "create_collection",
+            "add_item",
+            "remove_item",
+            "delete_collection",
+        },
+        "test_approved_likes_and_restoration": {
+            "like_article",
+            "unlike_article",
+            "like_pin",
+            "unlike_pin",
+        },
+        "test_approved_answer_and_cleanup": {"publish_answer", "edit_answer", "delete_answer"},
+    }
+    guard.allowed_steps = scopes[request.node.originalname]
     request.node.workflow_write_guard = guard
 
     def guarded(session, method, *args, **kwargs):
@@ -186,26 +243,56 @@ def _absent(fetch):
     return False
 
 
-def test_approved_collection_likes_answer_and_cleanup(request):
-    guard = request.node.workflow_write_guard
+def _preflight(client, guard):
+    me = client.get_self_info()
+    token = me["url_token"]
+    questions = _all(client, lambda: client.get_user_items("questions", token))
+    assert guard.question in {str(q["id"]) for q in questions}
+    collections = _all(client, lambda: client.get_user_items("collections", token))
+    answers = _all(client, lambda: client.get_user_answers(token))
+    guard.old_collections = {str(c["id"]) for c in collections}
+    guard.old_answers = {str(a["id"]) for a in answers}
+    assert not any(str(a.get("question", {}).get("id")) == guard.question for a in answers)
+    assert not client.get_draft_versions(guard.question, "question")["data"]
+    article, pin = client.get_article(guard.article), client.get_pin(guard.pin)
+    likes = any(s.startswith("like_") for s in guard.allowed_steps)
+    for detail in (article, pin):
+        author_id = detail.get("author", {}).get("id")
+        assert author_id
+        if likes:
+            assert str(author_id) != str(me["id"]), "Zhihu prohibits liking your own content"
+        else:
+            assert str(author_id) == str(me["id"])
+    assert _liked(article, "article") is False and _liked(pin, "pin") is False
+    guard.ready = True
+    return token
+
+
+def _client():
     cookie = get_saved_cookie_string()
     assert cookie, "A complete local login is required; credentials are not printed"
-    with ZhihuClient(cookie_str_to_dict(cookie)) as client:
-        me = client.get_self_info()
-        token = me["url_token"]
-        questions = _all(client, lambda: client.get_user_items("questions", token))
-        assert guard.question in {str(q["id"]) for q in questions}
-        collections = _all(client, lambda: client.get_user_items("collections", token))
-        answers = _all(client, lambda: client.get_user_answers(token))
-        guard.old_collections = {str(c["id"]) for c in collections}
-        guard.old_answers = {str(a["id"]) for a in answers}
-        assert not any(str(a.get("question", {}).get("id")) == guard.question for a in answers)
-        assert not client.get_draft_versions(guard.question, "question")["data"]
-        article, pin = client.get_article(guard.article), client.get_pin(guard.pin)
-        for detail in (article, pin):
-            assert str(detail.get("author", {}).get("id")) == str(me["id"])
-        assert _liked(article, "article") is False and _liked(pin, "pin") is False
-        guard.ready = True
+    return ZhihuClient(cookie_str_to_dict(cookie))
+
+
+def _record(request, guard, failures):
+    request.node.user_properties.extend(
+        [
+            ("marker", guard.marker),
+            ("created_collection_id", guard.collection or ""),
+            ("created_answer_id", guard.answer or ""),
+            ("writes", json.dumps(dict(guard.counts))),
+            ("responses", json.dumps(guard.responses, ensure_ascii=False)),
+            ("cleanup_passed", str(not failures)),
+        ]
+    )
+    if failures:
+        pytest.fail("Temporary-resource cleanup needs attention: " + "; ".join(failures))
+
+
+def test_approved_collection_and_cleanup(request):
+    guard = request.node.workflow_write_guard
+    with _client() as client:
+        token = _preflight(client, guard)
         try:
             result = run_json(
                 ["create-collection", guard.title, "--description", "临时接口实测，完成后删除。"]
@@ -219,17 +306,56 @@ def test_approved_collection_likes_answer_and_cleanup(request):
             assert any(str(x.get("content", x).get("id")) == guard.article for x in items)
             run_json(["collect", guard.collection, guard.article, "--type", "article", "--undo"])
             assert not client.get_collection_items(guard.collection)["data"]
-            for kind, rid in [("article", guard.article), ("pin", guard.pin)]:
-                run_json(["like-" + kind, rid])
-                _wait(
-                    lambda kind=kind, rid=rid: getattr(client, "get_" + kind)(rid),
-                    lambda obj, kind=kind: _liked(obj, kind) is True,
-                )
-                run_json(["like-" + kind, rid, "--undo"])
-                _wait(
-                    lambda kind=kind, rid=rid: getattr(client, "get_" + kind)(rid),
-                    lambda obj, kind=kind: _liked(obj, kind) is False,
-                )
+        finally:
+            failures = []
+            try:
+                if guard.counts["create_collection"] and not guard.collection:
+                    for obj in _all(client, lambda: client.get_user_items("collections", token)):
+                        if (
+                            obj.get("title") == guard.title
+                            and str(obj["id"]) not in guard.old_collections
+                        ):
+                            guard.bind("collection", obj["id"])
+                if guard.collection:
+                    client.execute_action(build_collection_request("delete", guard.collection))
+                    assert _absent(lambda: client.get_collection(guard.collection))
+            except Exception as error:
+                failures.append(f"collection {guard.collection}: {type(error).__name__}: {error}")
+            _record(request, guard, failures)
+
+
+@pytest.mark.parametrize("kind", ["article", "pin"])
+def test_approved_likes_and_restoration(request, kind):
+    guard = request.node.workflow_write_guard
+    guard.allowed_steps = {"like_" + kind, "unlike_" + kind}
+    rid = getattr(guard, kind)
+    with _client() as client:
+        _preflight(client, guard)
+        try:
+            run_json(["like-" + kind, rid])
+            _wait(
+                lambda: getattr(client, "get_" + kind)(rid), lambda obj: _liked(obj, kind) is True
+            )
+            run_json(["like-" + kind, rid, "--undo"])
+            _wait(
+                lambda: getattr(client, "get_" + kind)(rid), lambda obj: _liked(obj, kind) is False
+            )
+        finally:
+            failures = []
+            try:
+                if guard.counts["like_" + kind] and not guard.counts["unlike_" + kind]:
+                    client.execute_action(build_like_request(rid, kind=kind, undo=True))
+                assert _liked(getattr(client, "get_" + kind)(rid), kind) is False
+            except Exception as error:
+                failures.append(f"restore {kind}: {type(error).__name__}: {error}")
+            _record(request, guard, failures)
+
+
+def test_approved_answer_and_cleanup(request):
+    guard = request.node.workflow_write_guard
+    with _client() as client:
+        token = _preflight(client, guard)
+        try:
             texts = lifecycle_texts(guard.marker)
             result = run_json(["publish-answer", guard.question, texts[0]])
             guard.bind("answer", result["resource_id"])
@@ -245,53 +371,17 @@ def test_approved_collection_likes_answer_and_cleanup(request):
             )
         finally:
             failures = []
-            # Recover a receipt only from newly created resources with the exact approved marker.
-            if guard.counts["create_collection"] and not guard.collection:
-                for obj in _all(client, lambda: client.get_user_items("collections", token)):
-                    if (
-                        obj.get("title") == guard.title
-                        and str(obj["id"]) not in guard.old_collections
-                    ):
-                        guard.bind("collection", obj["id"])
-            if guard.counts["publish_answer"] and not guard.answer:
-                for obj in _all(client, lambda: client.get_user_answers(token)):
-                    if str(obj["id"]) not in guard.old_answers and guard.marker in strip_html(
-                        obj.get("content", "")
-                    ):
-                        guard.bind("answer", obj["id"])
-            for kind, rid in [("article", guard.article), ("pin", guard.pin)]:
-                if guard.counts["like_" + kind] and not guard.counts["unlike_" + kind]:
-                    try:
-                        client.execute_action(build_like_request(rid, kind=kind, undo=True))
-                        _wait(
-                            lambda kind=kind, rid=rid: getattr(client, "get_" + kind)(rid),
-                            lambda obj, kind=kind: _liked(obj, kind) is False,
-                        )
-                    except Exception as error:
-                        failures.append(f"restore {kind}: {type(error).__name__}: {error}")
-            if guard.answer:
-                try:
+            try:
+                if guard.counts["publish_answer"] and not guard.answer:
+                    for obj in _all(client, lambda: client.get_user_answers(token)):
+                        if str(obj["id"]) not in guard.old_answers and guard.marker in strip_html(
+                            obj.get("content", "")
+                        ):
+                            guard.bind("answer", obj["id"])
+                if guard.answer:
                     client.execute_action(build_answer_delete_request(guard.answer))
                     assert _absent(lambda: client.get_answer(guard.answer))
                     assert not client.get_draft_versions(guard.question, "question")["data"]
-                except Exception as error:
-                    failures.append(f"answer {guard.answer}: {type(error).__name__}: {error}")
-            if guard.collection:
-                try:
-                    client.execute_action(build_collection_request("delete", guard.collection))
-                    assert _absent(lambda: client.get_collection(guard.collection))
-                except Exception as error:
-                    failures.append(
-                        f"collection {guard.collection}: {type(error).__name__}: {error}"
-                    )
-            request.node.user_properties.extend(
-                [
-                    ("marker", guard.marker),
-                    ("created_collection_id", guard.collection or ""),
-                    ("created_answer_id", guard.answer or ""),
-                    ("writes", json.dumps(dict(guard.counts))),
-                    ("cleanup_passed", str(not failures)),
-                ]
-            )
-            if failures:
-                pytest.fail("Temporary-resource cleanup needs attention: " + "; ".join(failures))
+            except Exception as error:
+                failures.append(f"answer {guard.answer}: {type(error).__name__}: {error}")
+            _record(request, guard, failures)
