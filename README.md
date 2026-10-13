@@ -101,6 +101,58 @@ pytest -m integration --live tests/test_live.py --live-article-id <文章ID> --l
 正常工作的旧接口保持原请求方式，不统一强制加签；新增签名测试验证 URL 编码、Cookie 引号、
 设备 Cookie 变更及有限重试。发布与删除仍只做模拟测试，未改变账号内容。
 
+## 0.4：发布评论与回复
+
+新增 `comment` / `reply` / `comment-detail` / `replies` / `delete-comment`，所有命令支持 JSON。
+`comment` 和 `reply` 接受纯文本或 UTF-8 文件；纯文本会转义后生成 HTML，只有 `--html` 显式启用时
+才按 HTML 原文提交。默认不转换 Markdown。下面先预览，不会发送消息：
+
+```bash
+zhihu comment 123456 "这是一条评论" --type answer --dry-run --json
+zhihu reply 123456 789012 "回复这条评论" --type answer --dry-run --json
+zhihu comment 123456 --file comment.txt --type article --dry-run --json
+zhihu comment 123456 "回复这条评论" --type answer --reply-to 789012 --dry-run --json
+```
+
+确认目标和正文后，去掉 `--dry-run` 就会以当前账号实际发送。`--type` 支持
+`answer` / `article` / `pin` / `question`。`reply` 的第一个 ID 是原内容 ID，第二个是实际回复的
+评论 ID（可以是根评论或子评论）；不能用根评论 ID 替换你真正选择的子评论 ID。
+评论详情 API 不返回原内容 ID，因此命令要求两个 ID，不猜测内容归属。
+
+```bash
+zhihu comment-detail 789012 --json
+zhihu replies 789012 --limit 20 --all --json
+zhihu delete-comment 789012 --dry-run --json
+# 实际删除自己的评论会询问确认；-y 跳过确认
+zhihu delete-comment 789012 -y --json
+```
+
+`replies` 接受根评论 ID，保留整个回复会话中的 `reply_comment_id` 和 `reply_root_comment_id`，
+支持同样的游标分页。终端评论输出也显示 ID，便于指定回复目标。
+
+发送时，ZSE 签名绑定实际发送的 UTF-8 JSON 字节和当前 Cookie；中文、emoji 和 Cookie 引号不会
+被重新序列化。CSRF 头使用本次请求的 `_xsrf`。每条评论/回复/删除只发送一次，不自动重试；
+超时或响应缺失 ID 时会明确报告结果未知，应先读回检查再决定是否重试。返回的审核、仅自己可见
+等状态会保留，不能把“接口接收”当成“已向所有人公开显示”。
+
+开发测试：`pytest` 默认禁止真实 HTTP；普通线上测试仍只允许 GET。真实写入测试单独放在
+`tests/test_live_comment_write.py`，默认关闭。只有明确同意在自己的内容上发送临时测试消息后才运行：
+
+```bash
+pytest -m integration_write --live --live-write tests/test_live_comment_write.py \
+  --live-write-pin-id OWN_PIN_ID --live-write-marker APPROVED_MARKER
+```
+
+该用例核对当前账号拥有目标想法，最多发三条固定文本（根评论、回复根评论、回复子评论），
+读回验证关联 ID 后，按子评论优先顺序删除。请求保护器只允许这些新建 ID 的清理；断言失败也会
+尝试清理已确认创建的评论。没有返回 ID 的不确定写入不能盲目重发，也不能宣称已清理完成。
+这项真实写入验证需要单独授权，不能用只读测试或模拟测试替代。
+
+2026-10-13，经过用户明确授权，在账号自有想法上完成真实生命周期验证：根评论、回复根评论、
+回复子评论均成功写入并读回，直接/根回复 ID 关系正确；三条临时评论全部删除并验证移除。
+当前测试结果为 **364 个离线用例、33 个只读线上用例、1 个真实写入生命周期用例全部通过**。
+真实写入仅在这条自有想法上验证了 Pin 评论链路；其他资源类型的写入参数和行为由离线测试覆盖。
+
 ## 功能
 
 - **认证** — 二维码扫码登录（终端渲染）或手动粘贴 Cookie 登录（不支持从浏览器自动获取 Cookie）
@@ -332,7 +384,7 @@ zhihu --help
 ## 后续开发
 
 - [ ] 发布回答
-- [ ] 发布评论
+- [x] 发布评论与回复（0.4，真实写入测试单独启用）
 - [ ] 发布视频
 
 

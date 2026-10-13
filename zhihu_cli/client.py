@@ -21,6 +21,7 @@ from urllib.parse import urljoin, urlsplit
 import requests
 from PIL import Image
 
+from .comment_requests import build_comment_request, numeric_id
 from .config import (
     DEFAULT_TIMEOUT,
     ZHIHU_API_V4,
@@ -34,7 +35,7 @@ from .config import (
 )
 from .display import strip_html, to_html
 from .exceptions import DataFetchError, LoginError
-from .signing import sign_get_headers
+from .signing import sign_get_headers, sign_request_headers
 
 logger = logging.getLogger(__name__)
 
@@ -424,8 +425,13 @@ class ZhihuClient:
         limit: int = 20,
         order: str = "normal",
     ) -> dict:
-        """Read comments for an answer, article, or pin."""
-        resources = {"answer": "answers", "article": "articles", "pin": "pins"}
+        """Read comments for an answer, article, pin, or question."""
+        resources = {
+            "answer": "answers",
+            "article": "articles",
+            "pin": "pins",
+            "question": "questions",
+        }
         if resource_type not in resources:
             raise DataFetchError("Unsupported comment resource type")
         if resource_type == "answer":
@@ -446,6 +452,135 @@ class ZhihuClient:
 
     def get_pin(self, pin_id: str) -> dict:
         return self._get(f"{ZHIHU_API_V4}/pins/{pin_id}")
+
+    def get_comment(self, comment_id: str) -> dict:
+        """Read a V5 comment, retaining its root and direct reply target IDs."""
+        comment_id = numeric_id(comment_id, "Comment ID")
+        result = self._get(f"{ZHIHU_API_V4}/comment_v5/comment/{comment_id}")
+        if not isinstance(result, dict) or str(result.get("id")) != comment_id:
+            raise DataFetchError("Comment detail response has a missing or mismatched ID")
+        return result
+
+    def get_comment_replies(self, comment_id: str, offset: str | int = 0, limit: int = 20) -> dict:
+        """Read the reply conversation beneath a root comment."""
+        comment_id = numeric_id(comment_id, "Root comment ID")
+        return self._get(
+            f"{ZHIHU_API_V4}/comment_v5/comment/{comment_id}/child_comment",
+            params={"offset": offset, "limit": limit},
+        )
+
+    def _comment_write_once(self, method: str, url: str, payload: dict | None = None):
+        """Sign the exact UTF-8 body and send once. Never retry a social write."""
+        body = (
+            json.dumps(payload, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode(
+                "utf-8"
+            )
+            if payload is not None
+            else None
+        )
+        headers = {"Origin": "https://www.zhihu.com"}
+        if body is not None:
+            headers["Content-Type"] = "application/json"
+        prepared = self._session.prepare_request(
+            requests.Request(method, url, data=body, headers=headers)
+        )
+        cookies = {}
+        for fragment in prepared.headers.get("Cookie", "").split(";"):
+            name, separator, value = fragment.strip().partition("=")
+            if separator:
+                cookies[name] = value
+        if not all(cookies.get(key) for key in ("z_c0", "_xsrf", "d_c0")):
+            raise LoginError("Complete login cookies are required to write comments")
+        headers["x-xsrftoken"] = cookies["_xsrf"]
+        headers.update(sign_request_headers(prepared.path_url, cookies["d_c0"], body))
+        try:
+            response = self._session.request(
+                method,
+                url,
+                data=body,
+                headers=headers,
+                timeout=DEFAULT_TIMEOUT,
+                allow_redirects=False,
+            )
+        except requests.RequestException as error:
+            raise DataFetchError(
+                "Comment request failed; delivery is unknown. Check comments before retrying"
+            ) from error
+        if response.status_code == 401:
+            raise LoginError("Session expired or not logged in", status_code=401)
+        if response.status_code not in (200, 201, 204):
+            code = self._api_error(response).get("code")
+            suffix = f", code {code}" if code is not None else ""
+            raise DataFetchError(f"Comment request rejected ({response.status_code}{suffix})")
+        if response.status_code == 204 and method == "DELETE":
+            return {"success": True}
+        try:
+            result = response.json()
+        except ValueError as error:
+            raise DataFetchError(
+                "Invalid comment response; delivery is unknown. Check comments before retrying"
+            ) from error
+        if not isinstance(result, dict):
+            raise DataFetchError("Invalid comment response; check comments before retrying")
+        if result.get("error") or result.get("code", 0) != 0 or result.get("success") is False:
+            raise DataFetchError("Server rejected the comment operation")
+        return result
+
+    def create_comment(
+        self,
+        resource_id: str,
+        content: str,
+        resource_type: str = "answer",
+        *,
+        reply_comment_id: str | None = None,
+        as_html: bool = False,
+    ) -> dict:
+        """Submit a root comment or a reply to the exact selected comment ID."""
+        plan = build_comment_request(
+            resource_id, content, resource_type, reply_comment_id, as_html=as_html
+        )
+        result = self._comment_write_once("POST", plan["url"], plan["json"])
+        try:
+            numeric_id(result.get("id"), "Created comment ID")
+        except ValueError as error:
+            raise DataFetchError(
+                "Comment ID missing or invalid; delivery is unknown. Check before retrying"
+            ) from error
+        if result.get("is_delete"):
+            raise DataFetchError("Submitted comment is marked deleted by the server")
+        if plan["reply_comment_id"] is not None:
+            if str(result.get("reply_comment_id")) != plan["reply_comment_id"]:
+                raise DataFetchError(
+                    f"Comment {result['id']} was accepted, but the reply target is unconfirmed. "
+                    "Read the comment before retrying"
+                )
+        elif result.get("reply_comment_id") not in (None, "", "0", 0):
+            raise DataFetchError(
+                f"Comment {result['id']} was accepted as an unexpected reply. Read before retrying"
+            )
+        return result
+
+    def reply_comment(
+        self,
+        resource_id: str,
+        comment_id: str,
+        content: str,
+        resource_type: str = "answer",
+        *,
+        as_html: bool = False,
+    ) -> dict:
+        return self.create_comment(
+            resource_id, content, resource_type, reply_comment_id=comment_id, as_html=as_html
+        )
+
+    def delete_comment(self, comment_id: str) -> bool:
+        comment_id = numeric_id(comment_id, "Comment ID")
+        result = self._comment_write_once(
+            "DELETE", f"{ZHIHU_API_V4}/comment_v5/comment/{comment_id}"
+        )
+        if result.get("success") is not True:
+            raise DataFetchError("Comment deletion was not confirmed by the server")
+        return True
 
     # ===== Vote =====
 

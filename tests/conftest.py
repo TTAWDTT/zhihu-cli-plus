@@ -103,6 +103,25 @@ def no_live_network(monkeypatch, request):
     if request.node.get_closest_marker("integration"):
         if not request.config.getoption("--live"):
             pytest.skip("Explicit --live is required for online tests")
+        write_mode = bool(request.node.get_closest_marker("integration_write"))
+        if write_mode and not request.config.getoption("--live-write"):
+            pytest.skip("Explicit --live-write approval is required for comment lifecycle tests")
+        if write_mode:
+            from tests.test_live_comment_write import lifecycle_texts
+            from zhihu_cli.comment_requests import numeric_id
+
+            pin_id = request.config.getoption("--live-write-pin-id")
+            marker = request.config.getoption("--live-write-marker")
+            if not pin_id or not marker:
+                pytest.fail("A specific --live-write-pin-id and --live-write-marker are required")
+            state = {
+                "pin_id": numeric_id(pin_id),
+                "created": [],
+                "posts": 0,
+                "texts": lifecycle_texts(marker),
+                "deleted": [],
+            }
+            request.node.comment_write_state = state
         import time
 
         import requests
@@ -112,10 +131,54 @@ def no_live_network(monkeypatch, request):
 
         def read_only(session, method, *args, **kwargs):
             if method.upper() != "GET":
-                raise AssertionError("Online tests only allow GET requests")
+                if not write_mode:
+                    raise AssertionError("Online tests only allow GET requests")
+                url = args[0] if args else kwargs.get("url")
+                if method.upper() == "POST":
+                    expected = (
+                        f"https://www.zhihu.com/api/v4/comment_v5/pins/{state['pin_id']}/comment"
+                    )
+                    if url != expected or state["posts"] >= 3:
+                        raise AssertionError(
+                            "Only three approved posts on the specified pin are allowed"
+                        )
+                    payload = json.loads(kwargs.get("data", b"{}"))
+                    from html import escape
+
+                    index = state["posts"]
+                    if payload.get("content") != f"<p>{escape(state['texts'][index])}</p>":
+                        raise AssertionError("Post body differs from the approved lifecycle text")
+                    target = payload.get("reply_comment_id")
+                    if index == 0 and target is not None:
+                        raise AssertionError("The first test comment must be a root comment")
+                    if index > 0 and (
+                        len(state["created"]) < index or str(target) != state["created"][index - 1]
+                    ):
+                        raise AssertionError(
+                            "Replies may only target comments created by this test"
+                        )
+                    state["posts"] += 1
+                elif method.upper() == "DELETE":
+                    prefix = "https://www.zhihu.com/api/v4/comment_v5/comment/"
+                    comment_id = url.removeprefix(prefix)
+                    if not url.startswith(prefix) or comment_id not in state["created"]:
+                        raise AssertionError("Only comments created by this test may be deleted")
+                else:
+                    raise AssertionError(
+                        "This lifecycle test only allows GET, POST and cleanup DELETE"
+                    )
             time.sleep(max(0.0, 0.25 - (time.monotonic() - last_request[0])))
             last_request[0] = time.monotonic()
-            return original_request(session, method, *args, **kwargs)
+            response = original_request(session, method, *args, **kwargs)
+            if write_mode and method.upper() == "POST" and response.status_code in (200, 201):
+                try:
+                    data = response.json()
+                    comment_id = numeric_id(data.get("id"))
+                except (ValueError, AttributeError):
+                    pass
+                else:
+                    state["created"].append(comment_id)
+            return response
 
         monkeypatch.setattr("requests.sessions.Session.request", read_only)
         return
@@ -135,3 +198,10 @@ def pytest_addoption(parser):
         "--live-article-id", help="Optional published article for online comment tests"
     )
     parser.addoption("--live-pin-id", help="Optional published pin for online comment tests")
+    parser.addoption(
+        "--live-write",
+        action="store_true",
+        help="Explicitly allow the temporary comment lifecycle test",
+    )
+    parser.addoption("--live-write-pin-id", help="Your own pin for the approved lifecycle test")
+    parser.addoption("--live-write-marker", help="Unique marker shown in the approved test text")
