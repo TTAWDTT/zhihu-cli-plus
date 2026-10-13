@@ -53,7 +53,8 @@ def _show_comments(result):
         author = comment.get("author", {})
         author = author.get("member", author).get("name", "Anonymous")
         console.print(f"  {i}. {author}: {strip_html(comment.get('content', ''))}", markup=False)
-        console.print(f"     {format_count(comment.get('vote_count', 0))} likes", markup=False)
+        likes = comment.get("vote_count", comment.get("like_count", 0))
+        console.print(f"     {format_count(likes)} likes", markup=False)
 
 
 def _target(item):
@@ -362,7 +363,8 @@ def feeds(limit, comment_limit, all_comments, page_number, as_json, **paging):
                 target = item.get("target", {})
                 kind, item_id = target.get("type"), target.get("id")
                 if kind in methods and item_id:
-                    item["target"] = {**target, **methods[kind](str(item_id))}
+                    if not target.get("content"):
+                        item["target"] = {**target, **methods[kind](str(item_id))}
                     if comment_limit or all_comments:
                         item["comments"] = _fetch(
                             client,

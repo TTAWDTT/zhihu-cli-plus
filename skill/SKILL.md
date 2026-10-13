@@ -119,6 +119,9 @@ Plus 尚未独立发布到 PyPI；应在本 fork 的源码目录和专用虚拟�
 - `feeds --all-comments` 拉取每条内容的全部评论，`--all` 控制推荐流翻页。
 - JSON 集合保留 `data` 与 `paging`，多页添加 `pages_fetched`。
 - `status` 严格离线，不修复 Cookie；`whoami` 才在线验证。
+- 文章/想法评论使用 V5 接口，`like_count` 与已有 `child_comments` 会保留。
+- 已知线上限制：问题详情可能返回 403 / code 10003（客户端参数拒绝），不要清空 Cookie 或宣称查询成功。
+- 线上测试：`pytest -m integration --live tests/test_live.py`，默认关闭，运行时只允许 GET。
 - 写入失败或返回缺失 ID 时不要盲目重试；先确认线上结果，避免重复发布。
 
 ## 常用示例

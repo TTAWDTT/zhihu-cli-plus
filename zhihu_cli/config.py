@@ -30,6 +30,7 @@ ZHIHU_OAUTH_CAPTCHA = f"{ZHIHU_API_V3}/oauth/captcha/v2?type=captcha_sign_in"
 
 # HTTP defaults
 DEFAULT_TIMEOUT = 15
+ZHIHU_API_VERSION = "3.0.91"
 
 # 全局统一 Chrome 版本号，UA / sec-ch-ua / sec-fetch-* 均从此派生，避免指纹矛盾
 CHROME_VERSION = "145"

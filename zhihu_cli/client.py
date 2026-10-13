@@ -24,6 +24,7 @@ from PIL import Image
 from .config import (
     DEFAULT_TIMEOUT,
     ZHIHU_API_V4,
+    ZHIHU_API_VERSION,
     ZHIHU_CONTENT_DRAFTS_URL,
     ZHIHU_CONTENT_PUBLISH_URL,
     ZHIHU_IMAGE_API,
@@ -46,6 +47,7 @@ class ZhihuClient:
     def __init__(self, cookie_dict: dict):
         self._session = requests.Session()
         self._session.headers.update(get_browser_headers())
+        self._session.headers.update({"x-api-version": ZHIHU_API_VERSION, "x-app-za": "OS=Web"})
         for name, value in cookie_dict.items():
             self._session.cookies.set(name, value, domain=".zhihu.com")
         # CSRF token required by write APIs
@@ -88,6 +90,14 @@ class ZhihuClient:
         if resp.status_code == 401:
             raise LoginError("Session expired or not logged in", status_code=401)
         if resp.status_code == 403:
+            try:
+                error = resp.json().get("error", {})
+            except (ValueError, AttributeError):
+                error = {}
+            if isinstance(error, dict) and error.get("code") == 10003:
+                raise DataFetchError(
+                    "Zhihu rejected the client request parameters (403, code 10003)"
+                )
             raise LoginError("Access denied — check login status", status_code=403)
         if resp.status_code != 200:
             raise DataFetchError(
@@ -182,7 +192,7 @@ class ZhihuClient:
         url = f"{ZHIHU_API_V4}/questions/{question_id}"
         params = {
             "include": (
-                "data[*].author,answer_count,follower_count,"
+                "author,answer_count,follower_count,"
                 "visit_count,comment_count,created_time,"
                 "updated_time,detail,topics"
             ),
@@ -375,13 +385,19 @@ class ZhihuClient:
             raise DataFetchError("Unsupported comment resource type")
         if resource_type == "answer":
             return self.get_answer_comments(resource_id, offset=offset, limit=limit, order=order)
+        if order not in ("normal", "reverse"):
+            raise DataFetchError("Unsupported comment sort order")
         return self._get(
-            f"{ZHIHU_API_V4}/{resources[resource_type]}/{resource_id}/comments",
-            params={"offset": offset, "limit": limit, "order": order, "status": "open"},
+            f"{ZHIHU_API_V4}/comment_v5/{resources[resource_type]}/{resource_id}/root_comment",
+            params={
+                "offset": offset,
+                "limit": limit,
+                "order_by": "score" if order == "normal" else "ts",
+            },
         )
 
     def get_article(self, article_id: str) -> dict:
-        return self._get(f"{ZHIHU_API_V4}/articles/{article_id}")
+        return self._get(f"{ZHIHU_ZHUANLAN_API}/articles/{article_id}")
 
     def get_pin(self, pin_id: str) -> dict:
         return self._get(f"{ZHIHU_API_V4}/pins/{pin_id}")

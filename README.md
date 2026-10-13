@@ -77,7 +77,24 @@ HTML 正文重复包裹、想法正文长度计算不一致及图片上传固定
 部分 5xx 最多尝试三次，写操作不自动重试。没有增加知乎请求签名算法。
 
 开发验证：`python -m pip install -e . pytest ruff`，然后运行 `pytest`、
-`ruff check zhihu_cli tests`。单元测试阻止真实 HTTP 请求，线上接口仍需单独验证。
+`ruff check zhihu_cli tests`。单元测试阻止真实 HTTP 请求。线上用例默认不运行，必须显式启用：
+
+```bash
+pytest -m integration --live tests/test_live.py
+# 如账号缺少已发布文章/想法，可指定只读测试资源
+pytest -m integration --live tests/test_live.py --live-article-id <文章ID> --live-pin-id <想法ID>
+```
+
+线上测试读取已有本地 Cookie，不打印凭证；请求保护器只允许 GET，拒绝 POST/PUT/PATCH/DELETE。
+测试覆盖登录身份、搜索、热榜、推荐、用户列表、收藏/通知、三类评论、详情、真实游标续读、
+聚合页数上限和完整小集合。读取返回的完整推荐正文时不再重复请求详情接口。
+
+2026-10-13 实测：首轮 24 用例中 19 通过、5 失败。修正后 25 用例中 24 通过、1 失败。
+实测修正了文章/想法评论的 `comment_v5/.../root_comment` 路径、文章详情的专栏路径，
+以及 Web API 所需的 `x-api-version: 3.0.91` / `x-app-za: OS=Web` 请求头。
+**仍未解决**：`question --answers --json` 的问题详情请求被服务端以 403 / code 10003
+拒绝。这个线上用例保留为失败，不跳过；此错误表示客户端请求参数被拒绝，不能当成登录态过期。
+当前代码仍是草稿，不能据离线测试通过就认定所有线上接口可用。
 
 ## 功能
 

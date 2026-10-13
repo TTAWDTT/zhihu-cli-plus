@@ -144,6 +144,38 @@ def test_comment_endpoint_and_cursor(client, kind, path):
         client._session, "get", return_value=_make_response(json_data={"data": []})
     ) as get:
         client.get_comments("123", resource_type=kind, offset="opaque+cursor", order="reverse")
-    assert get.call_args.args[0].endswith(f"/{path}/123/comments")
+    suffix = f"/{path}/123/comments" if kind == "answer" else f"/comment_v5/{path}/123/root_comment"
+    assert get.call_args.args[0].endswith(suffix)
     assert get.call_args.kwargs["params"]["offset"] == "opaque+cursor"
-    assert get.call_args.kwargs["params"]["order"] == "reverse"
+    if kind == "answer":
+        assert get.call_args.kwargs["params"]["order"] == "reverse"
+    else:
+        assert get.call_args.kwargs["params"]["order_by"] == "ts"
+
+
+def test_api_version_and_web_platform_headers(client):
+    prepared = client._session.prepare_request(
+        requests.Request("GET", "https://www.zhihu.com/api/v4/me")
+    )
+    assert prepared.headers["x-api-version"] == "3.0.91"
+    assert prepared.headers["x-app-za"] == "OS=Web"
+
+
+def test_article_detail_uses_working_zhuanlan_api(client):
+    with patch.object(
+        client._session,
+        "get",
+        return_value=_make_response(json_data={"id": 1, "content": "<p>Body</p>"}),
+    ) as get:
+        article = client.get_article("1")
+    assert get.call_args.args[0] == "https://zhuanlan.zhihu.com/api/articles/1"
+    assert article["content"] == "<p>Body</p>"
+
+
+def test_request_parameter_rejection_is_not_an_expired_session(client):
+    response = _make_response(
+        403, json_data={"error": {"code": 10003, "message": "请求参数异常，请升级客户端后重试。"}}
+    )
+    with patch.object(client._session, "get", return_value=response):
+        with pytest.raises(DataFetchError, match="code 10003"):
+            client.get_question("123")

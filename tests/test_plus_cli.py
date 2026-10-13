@@ -284,3 +284,48 @@ def test_qr_login_json_keeps_progress_on_stderr(tmp_config_dir):
     assert result.exit_code == 0, result.output
     assert json.loads(result.stdout) == {"saved": True, "verified": True}
     assert "QR code progress" in result.stderr
+
+
+def test_feeds_uses_complete_content_already_provided_by_api(saved_cookies):
+    client = _make_mock_client(
+        get_feed={
+            "data": [
+                {"target": {"id": 1, "type": "answer", "content": "<p>Full provided answer</p>"}}
+            ]
+        },
+        get_comments={"data": []},
+    )
+    client.get_answer.side_effect = DataFetchError("detail API unavailable")
+    with patch("zhihu_cli.client.ZhihuClient", return_value=client):
+        result = CliRunner().invoke(cli, ["feeds", "--json"])
+    assert result.exit_code == 0, result.output
+    assert (
+        json.loads(result.stdout)["data"][0]["target"]["content"] == "<p>Full provided answer</p>"
+    )
+    client.get_answer.assert_not_called()
+    client.get_comments.assert_called_once()
+
+
+def test_v5_comment_metadata_and_like_count_survive_json_and_text(saved_cookies):
+    response = {
+        "data": [
+            {
+                "id": "1",
+                "content": "Root comment",
+                "like_count": 7,
+                "author": {"name": "Author"},
+                "child_comment_count": 1,
+                "child_comments": [{"id": "2", "content": "Child comment"}],
+            }
+        ],
+        "paging": {"is_end": True},
+        "counts": {"total_counts": 2},
+    }
+    client = _make_mock_client(get_comments=response)
+    with patch("zhihu_cli.client.ZhihuClient", return_value=client):
+        json_result = CliRunner().invoke(cli, ["comments", "123", "--type", "article", "--json"])
+        text_result = CliRunner().invoke(cli, ["comments", "123", "--type", "article"])
+    assert json_result.exit_code == text_result.exit_code == 0
+    assert json.loads(json_result.stdout) == response
+    assert "7 likes" in text_result.stdout
+    assert "Author" in text_result.stdout
