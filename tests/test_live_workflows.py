@@ -139,3 +139,10 @@ def test_live_history_text_has_a_readable_title_or_url():
     result = CliRunner().invoke(cli, ["history", "--limit", "2"])
     assert result.exit_code == 0
     assert "URL:" in result.stdout
+
+
+def test_live_current_answer_draft_is_separate_from_history(live_client):
+    current = live_client.get_current_answer_draft("2073514883392463629")
+    assert isinstance(current, dict)
+    versions = live_client.get_draft_versions("2073514883392463629", "question")
+    assert isinstance(versions["data"], list)

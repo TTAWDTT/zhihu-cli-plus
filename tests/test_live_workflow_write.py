@@ -13,6 +13,7 @@ import requests
 from tests.test_live import run_json
 from zhihu_cli.action_requests import (
     build_answer_delete_request,
+    build_answer_draft_delete_request,
     build_collection_request,
     build_like_request,
 )
@@ -22,7 +23,7 @@ from zhihu_cli.comment_requests import numeric_id
 from zhihu_cli.display import strip_html
 from zhihu_cli.exceptions import DataFetchError
 from zhihu_cli.pagination import collect_pages
-from zhihu_cli.workflow_client import action_object
+from zhihu_cli.workflow_client import action_object, action_resource_id
 
 pytestmark = [pytest.mark.integration, pytest.mark.integration_workflow_write]
 
@@ -51,6 +52,7 @@ class WriteGuard:
         self.last = 0.0
         self.allowed_steps = None
         self.responses = []
+        self.temporary_draft_checked = False
 
     def bind(self, kind, resource_id):
         resource_id = numeric_id(resource_id)
@@ -79,8 +81,15 @@ class WriteGuard:
                 key = "create_collection"
             elif self.collection and path == f"/api/v4/collections/{self.collection}/contents":
                 assert query == {"content_id": [self.article], "content_type": ["article"]}
-                assert body is None and method in ("POST", "DELETE")
-                key = "add_item" if method == "POST" else "remove_item"
+                assert body is None and method == "POST"
+                key = "add_item"
+            elif (
+                self.collection
+                and path == f"/api/v4/collections/{self.collection}/contents/{self.article}"
+            ):
+                assert query == {"content_type": ["article"]}
+                assert body is None and method == "DELETE"
+                key = "remove_item"
             elif (
                 method == "DELETE"
                 and self.collection
@@ -111,6 +120,10 @@ class WriteGuard:
             elif method == "DELETE" and self.answer and path == f"/api/v4/answers/{self.answer}":
                 assert not query and body is None
                 key = "delete_answer"
+            elif method == "DELETE" and path == f"/api/v4/questions/{self.question}/draft":
+                assert self.answer and self.temporary_draft_checked
+                assert not query and body is None
+                key = "delete_question_draft"
             if (
                 key is None
                 or self.counts[key]
@@ -120,7 +133,11 @@ class WriteGuard:
             self.counts[key] += 1
         time.sleep(max(0.0, 0.4 - (time.monotonic() - self.last)))
         self.last = time.monotonic()
-        response = self.original(session, method, *args, **kwargs)
+        try:
+            response = self.original(session, method, *args, **kwargs)
+        except requests.RequestException as error:
+            # urllib3 exception frames can expose prepared Cookie headers.
+            raise DataFetchError(f"Live HTTP transport failed: {type(error).__name__}") from None
         if key:
             diagnostic = {"step": key, "status": response.status_code}
             try:
@@ -158,8 +175,7 @@ class WriteGuard:
             self.responses.append(diagnostic)
         if key in ("create_collection", "publish_answer") and response.status_code in (200, 201):
             try:
-                data = action_object(response.json())
-                rid = data.get("id") or data.get("content_id")
+                rid = action_resource_id(response.json())
                 if rid:
                     self.bind("collection" if key == "create_collection" else "answer", rid)
             except (ValueError, AttributeError, DataFetchError):
@@ -201,7 +217,12 @@ def enable_guard(monkeypatch, request):
             "like_pin",
             "unlike_pin",
         },
-        "test_approved_answer_and_cleanup": {"publish_answer", "edit_answer", "delete_answer"},
+        "test_approved_answer_and_cleanup": {
+            "publish_answer",
+            "edit_answer",
+            "delete_answer",
+            "delete_question_draft",
+        },
     }
     guard.allowed_steps = scopes[request.node.originalname]
     request.node.workflow_write_guard = guard
@@ -247,13 +268,16 @@ def _preflight(client, guard):
     me = client.get_self_info()
     token = me["url_token"]
     questions = _all(client, lambda: client.get_user_items("questions", token))
-    assert guard.question in {str(q["id"]) for q in questions}
+    if "publish_answer" in guard.allowed_steps:
+        assert str(client.get_question(guard.question)["id"]) == guard.question
+    else:
+        assert guard.question in {str(q["id"]) for q in questions}
     collections = _all(client, lambda: client.get_user_items("collections", token))
     answers = _all(client, lambda: client.get_user_answers(token))
     guard.old_collections = {str(c["id"]) for c in collections}
     guard.old_answers = {str(a["id"]) for a in answers}
     assert not any(str(a.get("question", {}).get("id")) == guard.question for a in answers)
-    assert not client.get_draft_versions(guard.question, "question")["data"]
+    assert not client.get_current_answer_draft(guard.question)
     article, pin = client.get_article(guard.article), client.get_pin(guard.pin)
     likes = any(s.startswith("like_") for s in guard.allowed_steps)
     for detail in (article, pin):
@@ -275,6 +299,12 @@ def _client():
 
 
 def _record(request, guard, failures):
+    for step, resource in [
+        ("create_collection", guard.collection),
+        ("publish_answer", guard.answer),
+    ]:
+        if not resource and _creation_may_have_succeeded(guard, step):
+            failures.append(f"{step}: no resource ID; delayed delivery remains unresolved")
     request.node.user_properties.extend(
         [
             ("marker", guard.marker),
@@ -287,6 +317,19 @@ def _record(request, guard, failures):
     )
     if failures:
         pytest.fail("Temporary-resource cleanup needs attention: " + "; ".join(failures))
+
+
+def _creation_may_have_succeeded(guard, step):
+    for response in guard.responses:
+        write = response.get("data_status", {}).get("write", {})
+        if (
+            response["step"] == step
+            and response["status"] in (200, 201)
+            and response.get("code", 0) in (0, "0")
+            and not write.get("instruction")
+        ):
+            return True
+    return False
 
 
 def test_approved_collection_and_cleanup(request):
@@ -381,7 +424,16 @@ def test_approved_answer_and_cleanup(request):
                 if guard.answer:
                     client.execute_action(build_answer_delete_request(guard.answer))
                     assert _absent(lambda: client.get_answer(guard.answer))
-                    assert not client.get_draft_versions(guard.question, "question")["data"]
+                    _cleanup_created_draft(client, guard)
             except Exception as error:
                 failures.append(f"answer {guard.answer}: {type(error).__name__}: {error}")
             _record(request, guard, failures)
+
+
+def _cleanup_created_draft(client, guard):
+    current = client.get_current_answer_draft(guard.question)
+    if current:
+        assert strip_html(current.get("content", "")).strip() in lifecycle_texts(guard.marker)
+        guard.temporary_draft_checked = True
+        client.execute_action(build_answer_draft_delete_request(guard.question))
+    assert not client.get_current_answer_draft(guard.question)

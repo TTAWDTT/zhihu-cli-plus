@@ -12,6 +12,7 @@ from tests.test_cli import _make_mock_client
 from tests.test_client import _make_response
 from tests.test_pagination import NEXT, page
 from zhihu_cli.action_requests import (
+    build_answer_draft_delete_request,
     build_answer_publish_request,
     build_collection_request,
     build_draft_save_request,
@@ -74,6 +75,67 @@ def test_publish_plan_contains_web_publication_components():
     assert data["appreciate"] == {"can_reward": False, "tagline": ""}
     assert data["commercialReportInfo"] == {"isReport": 0}
     assert data["contentsTables"] == {"table_of_contents_enabled": False}
+
+
+def test_actual_published_content_id_is_preserved_and_returned(client):
+    payload = {
+        "published_content_id": "2093479943720255498",
+        "pinDraft": None,
+        "pinResp": None,
+        "questionResp": None,
+        "publish": {},
+    }
+    raw = {"code": 0, "message": "success", "data": {"result": json.dumps(payload)}}
+    with patch.object(client._session, "request", return_value=_make_response(200, raw)):
+        receipt = client.execute_action(build_answer_publish_request("123", "Text"))
+    assert receipt["resource_id"] == payload["published_content_id"]
+    assert receipt["data"] == raw["data"]
+
+
+@pytest.mark.parametrize("value", [True, -1, "other"])
+def test_invalid_published_content_id_is_not_accepted(client, value):
+    with patch.object(
+        client._session,
+        "request",
+        return_value=_make_response(200, {"published_content_id": value}),
+    ):
+        with pytest.raises(DataFetchError, match="Invalid returned ID"):
+            client.execute_action(build_answer_publish_request("123", "Text"))
+
+
+def test_historical_versions_do_not_prevent_new_answer_draft_creation(client):
+    with (
+        patch.object(client, "get_current_answer_draft", return_value={}),
+        patch.object(client, "get_draft_versions") as history,
+        patch.object(
+            client._session, "request", return_value=_make_response(200, {"success": True})
+        ),
+    ):
+        client.execute_action(build_draft_save_request("123", "Text"))
+        history.assert_not_called()
+
+
+def test_draft_deletion_requires_an_active_draft(client):
+    with (
+        patch.object(client, "get_current_answer_draft", return_value={}),
+        patch.object(client._session, "request") as send,
+    ):
+        with pytest.raises(DataFetchError, match="No current answer draft"):
+            client.execute_action(build_answer_draft_delete_request("123"))
+        send.assert_not_called()
+
+
+def test_current_answer_draft_read_uses_question_id(client):
+    with patch.object(client, "_get", return_value={}) as get:
+        assert client.get_current_answer_draft("123") == {}
+    assert get.call_args.args[0] == "https://www.zhihu.com/api/v4/questions/123/draft"
+
+
+def test_collection_removal_uses_content_id_in_path_not_add_query():
+    plan = build_collection_request("remove", "123", content_id="456", kind="article")
+    assert plan["method"] == "DELETE"
+    assert plan["url"] == "https://www.zhihu.com/api/v4/collections/123/contents/456"
+    assert plan["params"] == {"content_type": "article"}
 
 
 @pytest.mark.parametrize(
@@ -549,10 +611,7 @@ def test_draft_update_resolves_previous_length_without_mutating_preview(client):
     plan = build_draft_save_request("123", "New body", update=True)
     original = copy.deepcopy(plan)
     with (
-        patch.object(client, "get_draft_versions", return_value={"data": [{"id": "draft1"}]}),
-        patch.object(
-            client, "get_draft_detail", return_value={"id": "draft1", "draft": {"content_words": 3}}
-        ),
+        patch.object(client, "get_current_answer_draft", return_value={"content_words": 3}),
         patch.object(
             client._session, "request", return_value=_make_response(200, {"success": True})
         ) as send,
@@ -565,7 +624,9 @@ def test_draft_update_resolves_previous_length_without_mutating_preview(client):
 @pytest.mark.parametrize("update,data", [(False, [{"id": "existing"}]), (True, [])])
 def test_answer_draft_mode_must_match_existing_state(client, update, data):
     with (
-        patch.object(client, "get_draft_versions", return_value={"data": data}),
+        patch.object(
+            client, "get_current_answer_draft", return_value={"id": "existing"} if data else {}
+        ),
         patch.object(client._session, "request") as send,
     ):
         with pytest.raises(DataFetchError, match="does not match --update"):

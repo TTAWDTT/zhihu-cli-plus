@@ -11,6 +11,9 @@
 - Validate owner/target/result identity; decode nested publish results and retain raw fields.
 - Upgrade known legacy member-list HTTP cursors to HTTPS without changing their opaque query.
 - Enforce collection title/description web limits; report server rejection reasons and publication blocks.
+- Fix collection-removal paths and recognize `published_content_id` in unified publish results.
+- Check active answer drafts separately from retained historical versions.
+- Verify approved collection, article/pin like and answer publication/edit/delete lifecycles with cleanup.
 
 ## 0.6.0
 

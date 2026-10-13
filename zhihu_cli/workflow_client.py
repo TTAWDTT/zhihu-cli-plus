@@ -48,6 +48,11 @@ def action_object(result):
     return data
 
 
+def action_resource_id(result):
+    obj = action_object(result)
+    return obj.get("published_content_id") or obj.get("id") or obj.get("content_id")
+
+
 class WorkflowClientMixin:
     def get_user_items(self, kind, token=None, *, offset=0, limit=20):
         if kind not in ("pins", "questions", "activities", "collections"):
@@ -122,6 +127,12 @@ class WorkflowClientMixin:
                 "limit": limit,
             },
         )
+
+    def get_current_answer_draft(self, question_id):
+        result = self._get(f"{API}/questions/{numeric_id(question_id)}/draft")
+        if not isinstance(result, dict):
+            raise DataFetchError("Invalid current draft response")
+        return _object(result, "draft")
 
     def get_draft_detail(self, draft_id, version_type="current"):
         if isinstance(draft_id, bool) or not isinstance(draft_id, (str, int)):
@@ -212,6 +223,7 @@ class WorkflowClientMixin:
             "answer-publish",
             "answer-edit",
             "answer-delete",
+            "draft-delete",
         }
         if plan.get("operation") not in supported:
             raise ValueError("Unsupported operation")
@@ -234,27 +246,30 @@ class WorkflowClientMixin:
                 if str(article.get("id")) != rid:
                     raise DataFetchError("Ownership preflight returned a different article")
                 self._require_owner(article, label="article")
-            versions = self.get_draft_versions(
-                rid, "article" if kind == "article" else "question", limit=1
-            )
-            data = versions.get("data")
-            if not isinstance(data, list):
-                raise DataFetchError("Invalid draft history response")
-            if kind == "answer" and bool(data) != bool(targets["update"]):
-                raise DataFetchError(
-                    "Draft existence does not match --update; read draft versions first"
-                )
-            if data:
-                old = self.get_draft_detail(
-                    str(data[0]["id"]), data[0].get("version_type", "current")
-                )
+                versions = self.get_draft_versions(rid, "article", limit=1)
+                data = versions.get("data")
+                if not isinstance(data, list):
+                    raise DataFetchError("Invalid draft history response")
+                data = [v for v in data if v.get("version_type", "current") == "current"]
+                old = self.get_draft_detail(str(data[0]["id"]), "current") if data else {}
+                old = _object(old, "draft")
+            else:
+                old = self.get_current_answer_draft(rid)
+                if bool(old) != targets["update"]:
+                    raise DataFetchError(
+                        "Draft existence does not match --update; read drafts first"
+                    )
+            if old:
                 from .display import strip_html
 
-                old = _object(old, "draft")
                 old_length = old.get("content_words")
                 if old_length is None:
                     old_length = len(strip_html(old.get("content", "")))
                 plan["json"]["delta_time"] -= int(old_length)
+        if operation == "draft-delete" and not self.get_current_answer_draft(
+            targets["resource_id"]
+        ):
+            raise DataFetchError("No current answer draft to delete")
         prepared, headers = self._prepare_action(plan)  # Sign current cookies after preflight.
         try:
             response = self._session.request(
@@ -336,7 +351,7 @@ class WorkflowClientMixin:
             confirmed = True
         if operation in ("answer-publish", "answer-edit", "draft-save"):
             obj = action_object(result)
-            returned_id = obj.get("id") or obj.get("content_id")
+            returned_id = action_resource_id(result)
             if returned_id:
                 try:
                     if operation == "draft-save":
@@ -363,8 +378,7 @@ class WorkflowClientMixin:
         if not confirmed:
             raise DataFetchError("Operation not confirmed; read back before retrying")
         receipt = {**result, "operation": operation, "targets": targets}
-        obj = action_object(result)
-        resource_id = obj.get("id") or obj.get("content_id")
+        resource_id = action_resource_id(result)
         if resource_id:
             receipt["resource_id"] = str(resource_id)
         return receipt

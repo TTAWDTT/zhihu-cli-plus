@@ -95,8 +95,8 @@ def build_collection_request(
     return _plan(
         "collection-" + action,
         "POST" if action == "add" else "DELETE",
-        f"/collections/{cid}/contents",
-        params={"content_id": content_id, "content_type": kind},
+        f"/collections/{cid}/contents" + (f"/{content_id}" if action == "remove" else ""),
+        params={"content_type": kind, **({"content_id": content_id} if action == "add" else {})},
         collection_id=cid,
         content_id=content_id,
         content_type=kind,
@@ -275,3 +275,10 @@ def build_answer_publish_request(resource_id, content, *, edit=False, as_html=Fa
 def build_answer_delete_request(answer_id):
     answer_id = numeric_id(answer_id, "Answer ID")
     return _plan("answer-delete", "DELETE", f"/answers/{answer_id}", resource_id=answer_id)
+
+
+def build_answer_draft_delete_request(question_id):
+    question_id = numeric_id(question_id, "Question ID")
+    return _plan(
+        "draft-delete", "DELETE", f"/questions/{question_id}/draft", resource_id=question_id
+    )

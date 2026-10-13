@@ -6,7 +6,7 @@ from unittest.mock import Mock
 import pytest
 
 from tests.test_client import _make_response
-from tests.test_live_workflow_write import WriteGuard, lifecycle_texts
+from tests.test_live_workflow_write import WriteGuard, _creation_may_have_succeeded, lifecycle_texts
 
 
 @pytest.fixture()
@@ -70,3 +70,41 @@ def test_guard_publish_text_and_question_are_both_exact(guard):
     with pytest.raises(AssertionError):
         guard(None, "POST", plan["url"], data=json.dumps(plan["json"]).encode())
     guard.original.assert_not_called()
+
+
+def test_guard_blocks_draft_cleanup_without_verifying_test_content(guard):
+    guard.ready = True
+    guard.answer = "800"
+    guard.allowed_steps = {"delete_question_draft"}
+    with pytest.raises(AssertionError):
+        guard(None, "DELETE", "https://www.zhihu.com/api/v4/questions/3/draft")
+    guard.original.assert_not_called()
+
+
+def test_guard_binds_real_published_content_id(guard):
+    from zhihu_cli.action_requests import build_answer_publish_request
+
+    guard.ready = True
+    raw = {"code": 0, "data": {"result": json.dumps({"published_content_id": "800"})}}
+    guard.original.return_value = _make_response(200, raw)
+    plan = build_answer_publish_request("3", lifecycle_texts(guard.marker)[0])
+    guard(None, "POST", plan["url"], data=json.dumps(plan["json"]).encode())
+    assert guard.answer == "800"
+
+
+def test_transport_errors_do_not_expose_request_headers(guard):
+    import requests
+
+    from zhihu_cli.exceptions import DataFetchError
+
+    guard.original.side_effect = requests.ConnectionError("Cookie: secret-cookie")
+    with pytest.raises(DataFetchError, match="Live HTTP transport failed") as error:
+        guard(None, "GET", "https://www.zhihu.com/api/v4/me")
+    assert "secret-cookie" not in str(error.value)
+    assert error.value.__suppress_context__
+
+
+@pytest.mark.parametrize("code,expected", [(0, True), (103003, False)])
+def test_unknown_success_and_known_publish_rejection_are_distinct(guard, code, expected):
+    guard.responses = [{"step": "publish_answer", "status": 200, "code": code}]
+    assert _creation_may_have_succeeded(guard, "publish_answer") is expected

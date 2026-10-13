@@ -20,7 +20,7 @@ from ..action_requests import (
 )
 from ..display import console, print_success, strip_html
 from ..pagination import collect_pages, pagination_options
-from ..workflow_client import action_object
+from ..workflow_client import action_resource_id
 from .comments import _read_content
 from .content import _get_client, _show_collection
 
@@ -109,8 +109,7 @@ def _write(plan_factory, dry_run, as_json, *, confirm=None, yes=False):
         click.echo(json.dumps(result, ensure_ascii=False, indent=2))
     else:
         print_success(f"Operation accepted: {plan['operation']}")
-        data = action_object(result)
-        created_id = data.get("id") or data.get("content_id")
+        created_id = action_resource_id(result)
         if created_id:
             console.print(f"ID: {created_id}", markup=False)
 
