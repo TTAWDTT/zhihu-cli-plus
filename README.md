@@ -94,6 +94,61 @@ zhihu delete-comment <评论ID> --dry-run --json
 纯文本会转义为 HTML；只有 `--html` 显式启用时才直接提交 HTML。评论写入、删除、点赞和取消点赞均签名、携带 CSRF 头，写操作不自动重试。
 超时或响应不明确时应读回检查，再决定是否重试。API 接收不等于评论已公开展示，审核和仅自己可见的字段会保留。
 
+## 0.7：内容工作流与浏览历史
+
+新增独立详情、用户内容、收藏管理、文章/想法点赞、关注动态、草稿、回答发布/修改及浏览历史命令。查询保留原始 JSON；集合支持相同的游标分页。
+
+```bash
+zhihu article-detail <文章ID> --json
+zhihu pin-detail <想法ID> --json
+zhihu user-pins <url_token> --all --json
+zhihu user-questions <url_token> --json
+zhihu user-activities <url_token> --json
+zhihu user-collections <url_token> --json
+zhihu follow-feed --json
+
+zhihu collection-detail <收藏夹ID> --json
+zhihu collection-items <收藏夹ID> --all --json
+zhihu content-collections <内容ID> --type article --json
+zhihu create-collection '收藏夹名称' --dry-run --json
+zhihu collect <收藏夹ID> <内容ID> --type article --dry-run --json
+zhihu collect <收藏夹ID> <内容ID> --type article --undo --dry-run --json
+zhihu delete-collection <收藏夹ID> --dry-run --json
+
+zhihu like-article <文章ID> --dry-run --json
+zhihu like-pin <想法ID> --undo --dry-run --json
+zhihu follow-user <url_token> --dry-run --json
+zhihu notification-list --category follow --json
+zhihu notifications-read --category default --dry-run --json
+
+zhihu drafts --type article --json
+zhihu draft-versions <内容ID> --type article --json
+zhihu draft-detail <草稿ID> --json
+zhihu save-draft <问题ID> '回答草稿' --dry-run --json
+zhihu save-draft <问题ID> --file answer.html --html --update --dry-run --json
+zhihu save-draft <文章ID> '文章草稿' --type article --dry-run --json
+zhihu publish-answer <问题ID> '回答正文' --dry-run --json
+zhihu edit-answer <回答ID> '修改后的正文' --dry-run --json
+zhihu delete-answer <回答ID> --dry-run --json
+
+zhihu history --limit 20 --json
+zhihu history --all --max-pages 10 --json
+zhihu history-add <内容ID> --type article --dry-run --json
+zhihu history-touch <内容ID> --type article --state read --dry-run --json
+zhihu history-clear --dry-run --json
+```
+
+用户列表省略 `url_token` 时查询当前账号。新收藏夹默认私有，`--public` 显式公开。
+收藏增删、删除收藏夹和修改/删除回答会校验所属账号；保存文章草稿也校验文章所有者。
+`save-draft --type answer` 的 ID 是问题 ID，默认创建新草稿；已有草稿时必须显式 `--update`。
+收藏夹标题最多 20 字、描述最多 60 字（与网页一样按 UTF-16 长度计算）。知乎禁止给自己的文章和想法点赞。
+`draft-versions` 返回版本历史，删除后的记录可能保留；`save-draft --update` 检查实际当前草稿，历史记录不算已有草稿。
+保存操作先读取草稿状态，实际 `delta_time` 根据旧正文长度计算；离线预览只包含新正文长度，不能证明远端草稿状态。
+
+所有新增写操作提供 `--dry-run`，携带签名和当前 CSRF，单次发送、不自动重试。
+响应没有明确确认，或返回 ID/状态不符，会报告未确认；嵌套发布结果中的审核信息仍保留。
+浏览历史查询和普通内容查询不自动添加历史或上报触达。`history-clear`、通知全部已读、删除收藏夹/回答需确认，`--yes` 可跳过；这些操作不能通过模拟测试获得真实执行许可。
+
 ## 其他命令
 
 ```bash
@@ -121,9 +176,13 @@ python -m venv .venv
 
 # 只读线上测试，使用已有本地登录；请求保护器只允许 GET
 .venv/bin/python -m pytest -m 'integration and not integration_write and not integration_like' --live tests/test_live.py
+# 新增工作流的只读实测
+.venv/bin/python -m pytest -m integration --live tests/test_live_workflows.py
 ```
 
 普通测试阻止真实网络。真实评论写入、点赞测试分别需要专门的批准标志和指定目标，默认不执行。
+工作流真实写入测试另需 `--live-workflow-write`、明确批准的文章/想法/问题 ID 和唯一测试标记；点赞目标应为他人内容。请求保护器只允许预定的临时资源及恢复操作。
+0.7.0 开发分支已通过 654 个离线测试、62 个线上只读测试，以及经批准的私有收藏夹、文章/想法点赞、回答发布修改删除实测。临时公开资源和当前草稿已清理，点赞已恢复；知乎保留的版本历史不等于活动草稿。
 0.5.0 已验证 451 个离线测试、38 个线上只读测试，以及经批准并恢复状态的真实评论点赞测试。
 
 ## 发布

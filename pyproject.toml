@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "zhihu-cli-plus"
-version = "0.6.0"
-description = "知乎 CLI Plus：JSON、评论与回复、评论点赞、游标分页及签名请求"
+version = "0.7.0"
+description = "知乎 CLI Plus：JSON、评论、收藏夹、草稿、回答发布与浏览历史"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
@@ -54,6 +54,7 @@ markers = [
     "integration: requires valid login session",
     "integration_write: requires explicit approval; creates and cleans up three temporary comments",
     "integration_like: requires explicit approval; likes one specified comment and restores it",
+    "integration_workflow_write: requires explicit approval; bounded writes and cleanup on owned fixtures",
 ]
 addopts = "-m 'not integration'"
 

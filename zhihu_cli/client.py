@@ -12,6 +12,7 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 import time
 import uuid
 from pathlib import Path
@@ -36,11 +37,12 @@ from .config import (
 from .display import strip_html, to_html
 from .exceptions import DataFetchError, LoginError
 from .signing import sign_get_headers, sign_request_headers
+from .workflow_client import WorkflowClientMixin
 
 logger = logging.getLogger(__name__)
 
 
-class ZhihuClient:
+class ZhihuClient(WorkflowClientMixin):
     """Requests-based Zhihu API client.
 
     Uses cookie authentication to access Zhihu's V4 API.
@@ -147,6 +149,11 @@ class ZhihuClient:
                 and parsed.path.startswith(("/api/v3/", "/api/v4/"))
             )
             or (parsed.hostname == "zhuanlan.zhihu.com" and parsed.path.startswith("/api/"))
+            or (
+                parsed.hostname == "api.zhihu.com"
+                and parsed.path
+                in ("/unify-consumption/read_history", "/api/v4/unify-consumption/read_history")
+            )
         ):
             return {}
         for fragment in prepared.headers.get("Cookie", "").split(";"):
@@ -159,17 +166,37 @@ class ZhihuClient:
         """Resume an API cursor without sending credentials to another host."""
         url = urljoin("https://www.zhihu.com", url)
         parsed = urlsplit(url)
+        # These legacy list APIs return HTTP cursors even for HTTPS requests.
+        # Upgrade only their known read paths; never transmit a Cookie over HTTP.
+        if (
+            parsed.scheme == "http"
+            and parsed.hostname == "www.zhihu.com"
+            and re.fullmatch(
+                r"/api/v4/members/[A-Za-z0-9_-]+/(pins|questions|favlists)", parsed.path
+            )
+        ):
+            parsed = parsed._replace(scheme="https")
+            url = parsed.geturl()
         try:
             valid_port = parsed.port in (None, 443)
         except ValueError:
             valid_port = False
         if (
             parsed.scheme != "https"
-            or parsed.hostname != "www.zhihu.com"
+            or not (
+                (
+                    parsed.hostname == "www.zhihu.com"
+                    and parsed.path.startswith(("/api/v3/", "/api/v4/"))
+                )
+                or (
+                    parsed.hostname == "api.zhihu.com"
+                    and parsed.path
+                    in ("/unify-consumption/read_history", "/api/v4/unify-consumption/read_history")
+                )
+            )
             or parsed.username
             or parsed.password
             or not valid_port
-            or not parsed.path.startswith(("/api/v3/", "/api/v4/"))
             or parsed.fragment
         ):
             raise DataFetchError("Invalid pagination URL: expected a Zhihu HTTPS API URL")
