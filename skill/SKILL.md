@@ -1,182 +1,75 @@
 ---
-name: zhihu-cli
-description: "知乎 CLI (pyzhihu-cli)：搜索、热榜、问题/回答/评论、推荐 Feed、用户资料、发想法/提问/文章/评论及回复、删自己的内容、点赞关注、收藏与通知。Agent 代执行 zhihu 命令，Cookie 仅存本地。"
-author: BAIGUANGMEI
-version: "0.4.0"
-tags:
-  - zhihu
-  - cli
-  - 知乎
-  - agent
+name: zhihu-cli-plus
+description: 使用 zhihu-cli-plus 查询知乎内容、评论和回复，并按用户指令发布内容、回复评论或点赞。适用于本机 zhihu 命令的安装、查询和互动。
+metadata:
+  maintainer: TTAWDTT
+  upstream-author: BAIGUANGMEI
+  version: "0.6.0"
 ---
 
-# zhihu-cli-plus 技能
+# zhihu-cli-plus
 
-## 前提
+## 安装与身份
 
-- **已安装**：`zhihu` 在 PATH 中（`uv tool install pyzhihu-cli` / `pipx install pyzhihu-cli` / `pip install pyzhihu-cli`）。
-- **路径**：配置与二维码路径 — **Linux/macOS**：`~/.zhihu-cli/`（如 `~/.zhihu-cli/cookies.json`、`~/.zhihu-cli/login_qrcode.png`）；**Windows**：`%USERPROFILE%\.zhihu-cli\`（如 `%USERPROFILE%\.zhihu-cli\cookies.json`、`%USERPROFILE%\.zhihu-cli\login_qrcode.png`）。
-- **配置**：登录态存于上述 `cookies.json`；**不得将 Cookie 上传或写入对话/日志**。
-- **登录方式**：仅两种 — **扫码** `zhihu login --qrcode`、**粘贴 Cookie** `zhihu login --cookie "z_c0=...; _xsrf=...; d_c0=..."`。
-- **扫码时**：二维码会生成到上述路径的 `login_qrcode.png`。若用 OpenClaw 发给用户，须先**复制到 OpenClaw 工作目录的 media 文件夹**再 `openclaw message send --media <media 路径>`。
-
----
-
-## Instruction Scope
-
-本技能仅限：在用户本机调用已安装的 `zhihu` 命令，执行搜索、热榜、问题/回答/评论、推荐 Feed、用户资料、发想法/提问/文章、删除自己的内容、点赞关注、收藏与通知等操作；在用户请求扫码登录且已配置 OpenClaw 时，可将二维码图片经 OpenClaw 发送至用户指定渠道。不包含：代用户将 Cookie 上传至任何第三方、访问非知乎域名、或超出上述命令范围的操作。
-
----
-
-## Credentials
-
-- **知乎登录态**：仅存于用户本机（Linux/macOS：`~/.zhihu-cli/cookies.json`；Windows：`%USERPROFILE%\.zhihu-cli\cookies.json`，权限 0600）。Agent 仅通过执行 `zhihu` 命令间接使用，**不得将 Cookie 内容上传、转发或写入对话/日志**。
-- **OpenClaw**：若使用 `openclaw message send` 发送二维码，需用户自行配置 OpenClaw 及渠道凭证；本技能不声明、不持有该部分凭证。
-
----
-
-## 安装与更新
-
-Plus 尚未独立发布到 PyPI；应在本 fork 的源码目录和专用虚拟环境中运行
-`python -m pip install -e .`。下面的 PyPI 安装/更新命令针对上游，不能用于升级未发布的 Plus。
-
-- **安装**（任选其一）：
-  - `uv tool install pyzhihu-cli`
-  - `pipx install pyzhihu-cli`
-  - `pip install pyzhihu-cli`
-- **更新**：按安装方式执行 `uv tool upgrade pyzhihu-cli`、`pipx upgrade pyzhihu-cli` 或 `pip install -U pyzhihu-cli`。用户问「升级/更新 zhihu」时提示其执行对应命令；不确定安装方式时可三种都给出。
-- **版本**：`zhihu --version` 查看当前版本。
-
----
-
-## Agent 规则
-
-1. **诉求 → 命令**：按下表映射。
-2. **数据查询优先用 --json**：凡执行**数据查询类**指令（如 `search`、`hot`、`question`、`answers`、`answer`、`user`、`user-answers`、`user-articles`、`followers`、`following`、`feed`、`topic`、`collections`、`notifications`、`whoami` 等），**必须**带 `--json`，以获取 API 返回的完整数据，便于解析、汇总或向用户展示；不得仅依赖终端表格等非结构化输出。`feeds --json` 包含详情与评论；`answer --comments --json` 会将评论放在 `comments` 集合中。所有子命令均支持 JSON，错误和进度写入 stderr。
-3. **需登录时**：先 `zhihu status`；未登录则 `zhihu login --qrcode` 或引导用户 `zhihu login --cookie "..."`。
-4. **扫码登录**：执行 `zhihu login --qrcode` 后，若本轮未发过二维码且用户已配置 OpenClaw → 先将二维码复制到 OpenClaw 工作目录的 `media` 文件夹，再 `openclaw message send --channel <渠道> --target <目标> --media <media 路径>/login_qrcode.png --message "请用知乎 App 扫码并确认登录"`；**保持登录进程不中断**直到成功/失败/超时；用户说「重新登录/换号」则中断当前进程再重新执行登录。**复制步骤**：Linux/macOS：`mkdir -p ~/.openclaw/workspace/media && cp ~/.zhihu-cli/login_qrcode.png ~/.openclaw/workspace/media/`；Windows：`mkdir "%USERPROFILE%\.openclaw\workspace\media" 2>nul & copy "%USERPROFILE%\.zhihu-cli\login_qrcode.png" "%USERPROFILE%\.openclaw\workspace\media\login_qrcode.png"`（若 OpenClaw 工作目录不同则替换为实际路径）。
-5. **安全**：Cookie 仅本地；优先扫码，避免在不可信处粘贴 Cookie；可提醒 `zhihu logout` 清空。
-6. **升级**：`uv tool upgrade pyzhihu-cli` / `pipx upgrade pyzhihu-cli` / `pip install -U pyzhihu-cli`。
-
----
-
-## 诉求 → 命令 速查
-
-| 诉求 | 命令 |
-|------|------|
-| 登录 / 扫码登录 | `zhihu login --qrcode` |
-| Cookie 登录 | `zhihu login --cookie "z_c0=...; _xsrf=...; d_c0=..."` |
-| 重新登录 / 换号 | 中断当前进程 → `zhihu login --qrcode` |
-| 检查登录 | `zhihu status`；看资料 `zhihu whoami [--json]` |
-| 搜索 | `zhihu search "关键词" [--type general/people/topic] [--limit N] [--answers N] [--json]` |
-| 热榜 | `zhihu hot [--limit N] [--answers N] [--json]` |
-| 问题 | `zhihu question <id> [--json]`；回答列表 `zhihu answers <id> [--limit N] [--sort default/created] [--json]` |
-| 回答详情 | `zhihu answer <id> [--comments] [--limit N] [--json]`（JSON 包含评论，`--limit 0` 为全部） |
-| 用户 | `zhihu user <url_token> [--json]`；`user-answers` / `user-articles` / `followers` / `following` 均支持 `--limit N --json` |
-| 推荐 / 话题 | `zhihu feed [--limit N] [--json]`；`zhihu feeds [--limit N] [--comment-limit N] [--json]`；`zhihu topic <id> [--json]` |
-| 赞同 | `zhihu vote <answer_id>`；取消 `zhihu vote <answer_id> --neutral` |
-| 关注问题 | `zhihu follow-question <id>`；取消 `zhihu follow-question <id> --unfollow` |
-| 发提问 | `zhihu ask "标题" [-d "描述"] [-t 话题id ...] [-i 图 ...]` |
-| 发想法 | `zhihu pin "标题" [-c "正文"] [-i 图 ...]` |
-| 发文章 | `zhihu article "标题" "正文" [-t 话题id ...] [-i 图 ...]` |
-| 删提问/想法/文章 | `zhihu delete-question <id>` / `delete-pin <id>` / `delete-article <id>` [-y] |
-| 收藏 / 通知 | `zhihu collections [--limit N] [--json]`；`zhihu notifications [--limit N] [--offset M] [--json]` |
-| 退出 | `zhihu logout` |
-| 版本 / 升级 | `zhihu --version`；升级见上规则 6 |
-
----
-
-## 执行流程
-
-```
-用户诉求
-  → 若「重新登录/换号」：中断当前 → zhihu login --qrcode → [发二维码] → 等完成
-  → 否则：查上表得命令
-    → 若该命令需登录：zhihu status → 未登录则 zhihu login --qrcode 或 --cookie
-      → 若扫码且未发过图：复制到 media → openclaw message send --media ... → 保持进程
-    → 执行 zhihu <子命令>（数据查询类必须带 --json）
-    → 整理结果或报错提示
-```
-
----
-
-## 登录方式
-
-| 方式 | 命令 |
-|------|------|
-| 扫码 | `zhihu login --qrcode`：终端显示二维码并保存到本地（Linux/macOS：`~/.zhihu-cli/login_qrcode.png`；Windows：`%USERPROFILE%\.zhihu-cli\login_qrcode.png`）；可经 OpenClaw 发图给用户。 |
-| 手动 Cookie | `zhihu login --cookie "z_c0=...; _xsrf=...; d_c0=..."`（浏览器 F12 → Network → 请求头 Cookie 复制）。 |
-
----
-
-## Plus 分页与评论
-
-- 独立评论：`zhihu comments <id> --type answer/article/pin --json`，可选 `--order reverse`。
-- 集合命令：`--offset` 指定起点，`--next-url` 传入 API 的 `paging.next`，`--all` 拉取所有页，
-  `--max-pages` 默认 100，达到上限但未结束会报错，不返回部分成功。
-- `feed` / `feeds` 使用 `--page` 指定首页；自动翻页仍跟随 `paging.next`。
-- `--limit` 控制每页数量；`answer --comments --limit 0` 默认全部评论，每页 20 条。
-- `feeds --all-comments` 拉取每条内容的全部评论，`--all` 控制推荐流翻页。
-- JSON 集合保留 `data` 与 `paging`，多页添加 `pages_fetched`。
-- `status` 严格离线，不修复 Cookie；`whoami` 才在线验证。
-- 文章/想法评论使用 V5 接口，`like_count` 与已有 `child_comments` 会保留。
-- GET 返回 403 / code 10003 时，客户端自动计算 ZSE 签名并有限重试；不清空 Cookie。
-  普通权限拒绝和登录态失效不走此逻辑。问题详情与关联回答已在真实线上通过。
-- 2026-10-13：28 个只读线上用例全部通过；发布/删除仍使用模拟测试。
-- 线上测试：`pytest -m integration --live tests/test_live.py`，默认关闭，运行时只允许 GET。
-- 写入失败或返回缺失 ID 时不要盲目重试；先确认线上结果，避免重复发布。
-
-## 评论与回复写入（0.4）
-
-- 根评论：`zhihu comment <内容ID> "正文" --type answer/article/pin/question --json`。
-- 回复：`zhihu reply <内容ID> <实际目标评论ID> "正文" --type ... --json`，保留真正的子评论目标，不能改成根评论 ID。
-- 预览：添加 `--dry-run`，不会联网或发送；正文也可通过 `--file` 提供，`--html` 显式允许 HTML。
-- 查看：`comment-detail <评论ID> --json`；`replies <根评论ID> --all --json`。
-- 清理：`delete-comment <自己的评论ID> -y --json`；可以先 `--dry-run`。
-- 发评论/回复属于对外发消息，执行前需要用户明确授权目标和内容；开发功能不等于授权发送测试消息。
-- 发送只调用一次。网络异常、缺少 ID 或结果未知时先读回，不自动重复发送；审核与可见性状态按 API 原样保留。
-- 2026-10-13，经用户明确授权，已在自有想法上实测根评论、根/子回复、读回验证和三条评论清理。
-  这次授权仅限该次实测，不授权未来任意目标/内容的自动发送。
-
-## 常用示例
+分发包为 `zhihu-cli-plus`，命令仍为 `zhihu`，Python 模块仍为 `zhihu_cli`。
+当前使用 GitHub 安装；独立 PyPI 包未发布前，不用 `pipx install zhihu-cli-plus` 当作有效安装步骤。
 
 ```bash
-zhihu login --qrcode
-zhihu status
-zhihu search "Python" --json
-zhihu hot --limit 10 --json
-zhihu question 12345678 --json
-zhihu answers 12345678 --limit 5 --json
-zhihu answer 87654321 --comments --limit 5 --json
-zhihu user someone --json
-zhihu feed --limit 5 --json
-zhihu feeds --limit 3 --comment-limit 5 --json
-zhihu vote 87654321
-zhihu pin "标题" -c "<p>正文</p>"
-zhihu delete-pin 98765432 -y
-zhihu notifications -l 10 --json
-zhihu logout
+pipx install 'git+https://github.com/TTAWDTT/zhihu-cli-plus.git@main'
+pipx upgrade zhihu-cli-plus
+zhihu --version
 ```
 
-正文支持 HTML 富文本（`ask` 的 `-d`、`pin` 的 `-c`、`article` 的正文）。
+上游及 0.5.x 以前的 Plus 分发包名是 `pyzhihu-cli`。迁移时先卸载旧分发包，再安装上面的 Plus；登录文件保持在 `~/.zhihu-cli/`。
+在 Windows 中登录文件位于 `%USERPROFILE%\.zhihu-cli\`。
 
----
+## 登录与凭证
 
-## OpenClaw 发二维码（仅扫码时）
+用 `zhihu status --json` 检查本地状态，`zhihu whoami --json` 在线验证。
+需要登录时执行 `zhihu login --qrcode`，让用户扫码。`--cookie` 是另一种登录方式，但不要让用户把 Cookie 粘贴进聊天，也不要把 Cookie 放到日志、仓库或外部服务。
+二维码生成在配置目录的 `login_qrcode.png`。如用户明确指定了 OpenClaw 或其他消息渠道，可按该渠道的工具要求传递二维码；这项技能本身不授予向其他人发送消息的权限。
 
-1. 确保二维码已生成（Linux/macOS：`~/.zhihu-cli/login_qrcode.png`；Windows：`%USERPROFILE%\.zhihu-cli\login_qrcode.png`）。
-2. 复制到 OpenClaw 工作目录的 `media` 文件夹：
-   - **Linux/macOS**：`mkdir -p ~/.openclaw/workspace/media && cp ~/.zhihu-cli/login_qrcode.png ~/.openclaw/workspace/media/`
-   - **Windows（cmd）**：`mkdir "%USERPROFILE%\.openclaw\workspace\media" 2>nul & copy "%USERPROFILE%\.zhihu-cli\login_qrcode.png" "%USERPROFILE%\.openclaw\workspace\media\login_qrcode.png"`
-   - **Windows（PowerShell）**：`New-Item -ItemType Directory -Force "$env:USERPROFILE\.openclaw\workspace\media" | Out-Null; Copy-Item "$env:USERPROFILE\.zhihu-cli\login_qrcode.png" "$env:USERPROFILE\.openclaw\workspace\media\login_qrcode.png"`
-   （若 OpenClaw 工作目录不是默认的 `~/.openclaw/workspace` 或 `%USERPROFILE%\.openclaw\workspace`，则替换为实际路径。）
-3. 发送：`openclaw message send --channel <渠道> --target <目标> --media <工作目录>/media/login_qrcode.png --message "请用知乎 App 扫码并确认登录"`（Linux/macOS 用 `~/.openclaw/workspace/media/login_qrcode.png`，Windows 用 `%USERPROFILE%\.openclaw\workspace\media\login_qrcode.png` 或 PowerShell 中 `$env:USERPROFILE\.openclaw\workspace\media\login_qrcode.png`）。
-4. 不中断 `zhihu login --qrcode` 进程，等待用户完成。
+## 查询
 
----
+数据查询使用 `--json`，保留接口返回字段和 HTML 正文。错误、进度在 stderr，非零退出码表示失败；不要把失败当成空列表。
+参数不确定时读取 `zhihu <命令> --help`。
 
-## 错误处理
+| 需求 | 命令 |
+|---|---|
+| 搜索 / 热榜 | `zhihu search "关键词" --json` / `zhihu hot --json` |
+| 问题 / 回答 | `zhihu question <问题ID> --answers --json` / `zhihu answer <回答ID> --comments --json` |
+| 推荐 | `zhihu feed --json` / `zhihu feeds --json`（含详情和评论） |
+| 评论列表 | `zhihu comments <内容ID> --type answer/article/pin/question --json` |
+| 单条评论 | `zhihu comment-detail <评论ID> --json` |
+| 子评论会话 | `zhihu replies <根评论ID> --all --json` |
+| 用户与列表 | `zhihu user <url_token> --json`；`user-answers`、`user-articles`、`followers`、`following` |
+| 收藏 / 通知 | `zhihu collections --json` / `zhihu notifications --json` |
 
-- **401**：登录态失效，重新登录。**403**：可能是权限或风控拒绝，不直接清空现有登录态。
-- **超时 / 网络**：提示重试或检查网络。
-- **其他**：根据 CLI 报错给简短原因与建议（如检查 ID、url_token）。
+集合分页用 `--all --max-pages N`，或把前次 `paging.next` 传给 `--next-url`，不要自己拼接不透明游标。
+`comments --all` 翻根评论页，未随根评论返回的回复需要另外用 `replies` 获取。
+评论的 `id`、`reply_comment_id`、`reply_root_comment_id` 分别代表自身、直接回复目标和根评论；列表序号不是评论 ID。
+
+## 发布与互动
+
+按用户指令选择目标和操作。新增功能或模拟测试不代表允许对任意真实评论发布或点赞；实测先确定具体目标、操作和恢复方式。
+`--dry-run` 可用于评论、回复、删除评论和评论点赞的离线请求预览，不读取 Cookie、不联网。
+
+```bash
+zhihu comment <内容ID> "正文" --type article --dry-run --json
+zhihu reply <内容ID> <实际目标评论ID> "正文" --type article --dry-run --json
+zhihu like-comment <评论ID> --dry-run --json
+zhihu like-comment <评论ID> --undo --dry-run --json
+zhihu delete-comment <评论ID> --dry-run --json
+```
+
+去掉 `--dry-run` 才会实际写入。回复子评论时保留真实目标 ID，不能替换为根评论 ID。
+点赞与取消均可用于根评论、子评论；用 `comment-detail` 的 `liked` 字段读回状态。
+经批准的临时点赞测试不得取消原先已有的点赞；原先未点赞时，完成验证后取消本次点赞并读回恢复状态。
+
+`vote` 操作回答的赞同，`like-comment` 操作评论的点赞；两者的 ID 不能混用。
+发布提问、想法、文章使用 `ask`、`pin`、`article`，删除自己的内容使用相应 `delete-*` 命令；按 `--help` 确认参数。
+
+评论相关写请求不会自动重试。超时、响应不明确或目标校验失败时先读回，再决定下一步，避免重复写入。
+接口接收与审核公开状态不同；如出现 `reviewing` 或 `is_visible_only_to_myself`，保留这一事实。
+
+本项目来源于 BAIGUANGMEI/zhihu-cli；Plus 的历史、许可与发布说明见仓库中的 `NOTICE`、`LICENSE`、`CHANGELOG.md`。
