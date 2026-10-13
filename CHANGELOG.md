@@ -7,8 +7,8 @@
 - Update project branding, GitHub badges, installation and migration instructions.
 - Retain upstream authorship/history, Apache-2.0 license and signing attributions.
 - Prepare manual PyPI Trusted Publishing and package metadata checks.
-- GitHub fork-network detachment remains a separate decision: the documented
-  self-service operation loses repository metadata, including pull requests.
+- Retain the GitHub fork association to preserve PR, Release and repository history.
+- Use GitHub Releases; defer PyPI publication until future account configuration.
 
 ## 0.5.0
 

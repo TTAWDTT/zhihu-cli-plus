@@ -22,12 +22,10 @@ pull requests, and that the operation is permanent. The current repository
 contains merged PR history and published Releases, so this operation has not
 been performed.
 
-Keep the existing repository until a metadata-preserving option is confirmed,
-or explicitly choose an archival migration: retain the old repository under a
-new archive name, create a standalone repository, transfer Git branches/tags,
-and link the historical PRs and Releases from the new project. Original links
-and PR numbering need separate handling in that migration. No repository is
-deleted as part of the package rename.
+The chosen migration on 2026-10-13 is to retain the current repository and fork
+association, preserving its URL, merged PRs, Releases and other metadata.
+Package identity and maintenance are independent of that GitHub association.
+No repository is detached, renamed, archived or deleted in this migration.
 
 Original authorship, history and Apache-2.0 license remain in the codebase;
 see `NOTICE` and `LICENSE`. Signature-source MIT attribution remains in
@@ -43,7 +41,11 @@ The changelog must contain a section for that version.
 
 ## First PyPI publication
 
-Use [PyPI's pending Trusted Publisher](https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/)
+GitHub Releases were selected as the publication channel on 2026-10-13.
+PyPI publication is deferred; the manual workflow below is prepared but is not
+triggered by this migration.
+
+For a future PyPI release, use [PyPI's pending Trusted Publisher](https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/)
 from a logged-in PyPI account. Configure:
 
 | Field | Value |
