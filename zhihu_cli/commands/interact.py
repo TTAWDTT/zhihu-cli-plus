@@ -20,7 +20,9 @@ from ..display import (
     print_success,
     print_warning,
     strip_html,
+    to_html,
 )
+from ..pagination import collect_pages, pagination_options
 
 
 @contextmanager
@@ -38,17 +40,30 @@ def _get_client():
 @click.command()
 @click.argument("answer_id", type=int)
 @click.option("--up", "action", flag_value="up", default=True, help="Upvote (default)")
-@click.option("--neutral", "action", flag_value="neutral", help="Cancel vote")
-def vote(answer_id: int, action: str):
+@click.option("--neutral", "--undo", "action", flag_value="neutral", help="Cancel vote")
+@click.option("--json", "as_json", is_flag=True, help="Output JSON")
+def vote(answer_id: int, action: str, as_json: bool):
     """Vote on an answer."""
     with _get_client() as client:
         try:
             if action == "up":
-                client.vote_up(answer_id)
-                print_success(f"Upvoted answer [bold]{answer_id}[/bold]")
+                if not client.vote_up(answer_id):
+                    raise click.ClickException("Request was rejected by the server")
+                if as_json:
+                    click.echo(
+                        json.dumps({"success": True, "answer_id": answer_id, "action": "up"})
+                    )
+                else:
+                    print_success(f"Upvoted answer [bold]{answer_id}[/bold]")
             else:
-                client.vote_neutral(answer_id)
-                print_success(f"Cancelled vote on answer [bold]{answer_id}[/bold]")
+                if not client.vote_neutral(answer_id):
+                    raise click.ClickException("Request was rejected by the server")
+                if as_json:
+                    click.echo(
+                        json.dumps({"success": True, "answer_id": answer_id, "action": "neutral"})
+                    )
+                else:
+                    print_success(f"Cancelled vote on answer [bold]{answer_id}[/bold]")
         except Exception as e:
             print_error(f"Vote failed: {e}")
             sys.exit(1)
@@ -56,30 +71,58 @@ def vote(answer_id: int, action: str):
 
 @click.command("follow-question")
 @click.argument("question_id", type=int)
-@click.option("--unfollow", is_flag=True, help="Unfollow instead")
-def follow_question(question_id: int, unfollow: bool):
+@click.option("--unfollow", "--undo", is_flag=True, help="Unfollow instead")
+@click.option("--json", "as_json", is_flag=True, help="Output JSON")
+def follow_question(question_id: int, unfollow: bool, as_json: bool):
     """Follow or unfollow a question."""
     with _get_client() as client:
         try:
             if unfollow:
-                client.unfollow_question(question_id)
-                print_success(f"Unfollowed question [bold]{question_id}[/bold]")
+                if not client.unfollow_question(question_id):
+                    raise click.ClickException("Request was rejected by the server")
+                if as_json:
+                    click.echo(
+                        json.dumps(
+                            {"success": True, "question_id": question_id, "action": "unfollow"}
+                        )
+                    )
+                else:
+                    print_success(f"Unfollowed question [bold]{question_id}[/bold]")
             else:
-                client.follow_question(question_id)
-                print_success(f"Followed question [bold]{question_id}[/bold]")
+                if not client.follow_question(question_id):
+                    raise click.ClickException("Request was rejected by the server")
+                if as_json:
+                    click.echo(
+                        json.dumps(
+                            {"success": True, "question_id": question_id, "action": "follow"}
+                        )
+                    )
+                else:
+                    print_success(f"Followed question [bold]{question_id}[/bold]")
         except Exception as e:
             print_error(f"Operation failed: {e}")
             sys.exit(1)
 
 
 @click.command()
-@click.option("-l", "--limit", default=10, help="Number of items", show_default=True)
+@click.option(
+    "-l",
+    "--limit",
+    default=10,
+    type=click.IntRange(min=1),
+    help="Items per page",
+    show_default=True,
+)
 @click.option("--json", "as_json", is_flag=True, help="Output raw JSON")
-def collections(limit: int, as_json: bool):
+@pagination_options
+def collections(limit: int, as_json: bool, **paging):
     """List your collections (收藏夹)."""
     with _get_client() as client:
         try:
-            results = client.get_collections(limit=limit)
+            offset = paging.pop("offset")
+            results = collect_pages(
+                client, lambda: client.get_collections(limit=limit, offset=offset), **paging
+            )
             data = results.get("data", [])
         except Exception as e:
             print_error(f"Failed to fetch collections: {e}")
@@ -128,14 +171,24 @@ def _format_notification_line(n: dict) -> str:
 
 
 @click.command()
-@click.option("-l", "--limit", default=10, help="Number of items", show_default=True)
-@click.option("--offset", default=0, help="Pagination offset (from paging.next)", show_default=True)
+@click.option(
+    "-l",
+    "--limit",
+    default=10,
+    type=click.IntRange(min=1),
+    help="Items per page",
+    show_default=True,
+)
 @click.option("--json", "as_json", is_flag=True, help="Output raw JSON")
-def notifications(limit: int, offset: int, as_json: bool):
+@pagination_options
+def notifications(limit: int, as_json: bool, **options):
     """Show recent notifications (v2/recent)."""
     with _get_client() as client:
         try:
-            results = client.get_notifications(limit=limit, offset=offset)
+            offset = options.pop("offset")
+            results = collect_pages(
+                client, lambda: client.get_notifications(limit=limit, offset=offset), **options
+            )
             data = results.get("data", [])
             paging = results.get("paging", {})
         except Exception as e:
@@ -179,7 +232,8 @@ def notifications(limit: int, offset: int, as_json: bool):
 @click.option("-d", "--detail", default="", help="Question description")
 @click.option("-t", "--topic", "topics", multiple=True, help="Topic ID (repeatable)")
 @click.option("-i", "--image", "images", multiple=True, help="Image file path (repeatable)")
-def ask(title: str, detail: str, topics: tuple[str, ...], images: tuple[str, ...]):
+@click.option("--json", "as_json", is_flag=True, help="Output JSON")
+def ask(title: str, detail: str, topics: tuple[str, ...], images: tuple[str, ...], as_json: bool):
     """Post a new question (发布提问)."""
     if not title.strip():
         print_error("Title cannot be empty")
@@ -191,7 +245,7 @@ def ask(title: str, detail: str, topics: tuple[str, ...], images: tuple[str, ...
             if images:
                 image_infos = []
                 for img_path in images:
-                    print_info(f"Uploading image: {img_path}")
+                    click.echo(f"Uploading image: {img_path}", err=True)
                     info = client.upload_image(img_path, source="question")
                     image_infos.append(info)
 
@@ -202,13 +256,19 @@ def ask(title: str, detail: str, topics: tuple[str, ...], images: tuple[str, ...
                 image_infos=image_infos,
             )
             qid = result.get("id", "")
+            if qid and as_json:
+                click.echo(json.dumps(result, ensure_ascii=False))
+                return
             if qid:
                 print_success(
                     f"Question created!  ID: [bold]{qid}[/bold]\n"
                     f"  https://www.zhihu.com/question/{qid}"
                 )
             else:
-                print_warning("Question may have been created but no ID returned")
+                print_warning(
+                    "Question may have been created but no ID returned; verify before retrying"
+                )
+                sys.exit(1)
         except Exception as e:
             print_error(f"Failed to create question: {e}")
             sys.exit(1)
@@ -218,7 +278,8 @@ def ask(title: str, detail: str, topics: tuple[str, ...], images: tuple[str, ...
 @click.argument("title")
 @click.option("-c", "--content", default="", help="Pin body content (optional)")
 @click.option("-i", "--image", "images", multiple=True, help="Image file path (repeatable)")
-def pin(title: str, content: str, images: tuple[str, ...]):
+@click.option("--json", "as_json", is_flag=True, help="Output JSON")
+def pin(title: str, content: str, images: tuple[str, ...], as_json: bool):
     """Write a new pin / thought (发布想法). Title and content, payload similar to question."""
     if not title.strip():
         print_error("Title cannot be empty")
@@ -230,7 +291,7 @@ def pin(title: str, content: str, images: tuple[str, ...]):
             if images:
                 image_infos = []
                 for img_path in images:
-                    print_info(f"Uploading image: {img_path}")
+                    click.echo(f"Uploading image: {img_path}", err=True)
                     info = client.upload_image(img_path, source="pin")
                     image_infos.append(info)
 
@@ -240,13 +301,18 @@ def pin(title: str, content: str, images: tuple[str, ...]):
                 image_infos=image_infos,
             )
             pid = result.get("id", "")
+            if pid and as_json:
+                click.echo(json.dumps(result, ensure_ascii=False))
+                return
             if pid:
                 print_success(
-                    f"Pin published!  ID: [bold]{pid}[/bold]\n"
-                    f"  https://www.zhihu.com/pin/{pid}"
+                    f"Pin published!  ID: [bold]{pid}[/bold]\n  https://www.zhihu.com/pin/{pid}"
                 )
             else:
-                print_warning("Pin may have been created but no ID returned")
+                print_warning(
+                    "Pin may have been created but no ID returned; verify before retrying"
+                )
+                sys.exit(1)
         except Exception as e:
             print_error(f"Failed to create pin: {e}")
             sys.exit(1)
@@ -257,7 +323,10 @@ def pin(title: str, content: str, images: tuple[str, ...]):
 @click.argument("content")
 @click.option("-t", "--topic", "topics", multiple=True, help="Topic ID (repeatable)")
 @click.option("-i", "--image", "images", multiple=True, help="Image file path (repeatable)")
-def article(title: str, content: str, topics: tuple[str, ...], images: tuple[str, ...]):
+@click.option("--json", "as_json", is_flag=True, help="Output JSON")
+def article(
+    title: str, content: str, topics: tuple[str, ...], images: tuple[str, ...], as_json: bool
+):
     """Publish a new article (发布文章)."""
     if not title.strip():
         print_error("Title cannot be empty")
@@ -268,12 +337,12 @@ def article(title: str, content: str, topics: tuple[str, ...], images: tuple[str
 
     with _get_client() as client:
         try:
-            body = f"<p>{content.strip()}</p>"
+            body = to_html(content)
             image_infos = None
             if images:
                 image_infos = []
                 for img_path in images:
-                    print_info(f"Uploading image: {img_path}")
+                    click.echo(f"Uploading image: {img_path}", err=True)
                     info = client.upload_image(img_path, source="article")
                     image_infos.append(info)
 
@@ -284,13 +353,19 @@ def article(title: str, content: str, topics: tuple[str, ...], images: tuple[str
                 topic_ids=list(topics) if topics else None,
             )
             aid = result.get("id", "")
+            if aid and as_json:
+                click.echo(json.dumps(result, ensure_ascii=False))
+                return
             if aid:
                 print_success(
                     f"Article published!  ID: [bold]{aid}[/bold]\n"
                     f"  https://zhuanlan.zhihu.com/p/{aid}"
                 )
             else:
-                print_warning("Article may have been published but no ID returned")
+                print_warning(
+                    "Article may have been published but no ID returned; verify before retrying"
+                )
+                sys.exit(1)
         except Exception as e:
             print_error(f"Failed to publish article: {e}")
             sys.exit(1)
@@ -299,15 +374,21 @@ def article(title: str, content: str, topics: tuple[str, ...], images: tuple[str
 @click.command("delete-question")
 @click.argument("question_id", type=str)
 @click.option("-y", "--yes", "skip_confirm", is_flag=True, help="Skip confirmation")
-def delete_question(question_id: str, skip_confirm: bool):
+@click.option("--json", "as_json", is_flag=True, help="Output JSON")
+def delete_question(question_id: str, skip_confirm: bool, as_json: bool):
     """Delete your own question (删除自己发布的提问)."""
     if not skip_confirm:
-        click.confirm(f"Delete question {question_id}? This cannot be undone.", abort=True)
+        click.confirm(
+            f"Delete question {question_id}? This cannot be undone.", abort=True, err=True
+        )
     with _get_client() as client:
         try:
             ok = client.delete_question(question_id)
             if ok:
-                print_success(f"Question [bold]{question_id}[/bold] deleted")
+                if as_json:
+                    click.echo(json.dumps({"success": True, "id": question_id}))
+                else:
+                    print_success(f"Question [bold]{question_id}[/bold] deleted")
             else:
                 print_error("Delete request was not accepted by the server")
                 sys.exit(1)
@@ -319,15 +400,19 @@ def delete_question(question_id: str, skip_confirm: bool):
 @click.command("delete-pin")
 @click.argument("pin_id", type=str)
 @click.option("-y", "--yes", "skip_confirm", is_flag=True, help="Skip confirmation")
-def delete_pin(pin_id: str, skip_confirm: bool):
+@click.option("--json", "as_json", is_flag=True, help="Output JSON")
+def delete_pin(pin_id: str, skip_confirm: bool, as_json: bool):
     """Delete your own pin / thought (删除自己发布的想法)."""
     if not skip_confirm:
-        click.confirm(f"Delete pin {pin_id}? This cannot be undone.", abort=True)
+        click.confirm(f"Delete pin {pin_id}? This cannot be undone.", abort=True, err=True)
     with _get_client() as client:
         try:
             ok = client.delete_pin(pin_id)
             if ok:
-                print_success(f"Pin [bold]{pin_id}[/bold] deleted")
+                if as_json:
+                    click.echo(json.dumps({"success": True, "id": pin_id}))
+                else:
+                    print_success(f"Pin [bold]{pin_id}[/bold] deleted")
             else:
                 print_error("Delete request was not accepted by the server")
                 sys.exit(1)
@@ -339,15 +424,19 @@ def delete_pin(pin_id: str, skip_confirm: bool):
 @click.command("delete-article")
 @click.argument("article_id", type=str)
 @click.option("-y", "--yes", "skip_confirm", is_flag=True, help="Skip confirmation")
-def delete_article_cmd(article_id: str, skip_confirm: bool):
+@click.option("--json", "as_json", is_flag=True, help="Output JSON")
+def delete_article_cmd(article_id: str, skip_confirm: bool, as_json: bool):
     """Delete your own article (删除自己发布的文章)."""
     if not skip_confirm:
-        click.confirm(f"Delete article {article_id}? This cannot be undone.", abort=True)
+        click.confirm(f"Delete article {article_id}? This cannot be undone.", abort=True, err=True)
     with _get_client() as client:
         try:
             ok = client.delete_article(article_id)
             if ok:
-                print_success(f"Article [bold]{article_id}[/bold] deleted")
+                if as_json:
+                    click.echo(json.dumps({"success": True, "id": article_id}))
+                else:
+                    print_success(f"Article [bold]{article_id}[/bold] deleted")
             else:
                 print_error("Delete request was not accepted by the server")
                 sys.exit(1)

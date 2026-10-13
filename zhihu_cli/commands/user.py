@@ -12,13 +12,13 @@ from ..auth import cookie_str_to_dict, get_cookie_string
 from ..display import (
     console,
     format_count,
-    format_stats_line,
     make_kv_table,
     make_table,
     print_error,
     print_info,
     strip_html,
 )
+from ..pagination import collect_pages, pagination_options
 
 
 @contextmanager
@@ -73,13 +73,29 @@ def user(url_token: str, as_json: bool):
 
 @click.command("user-answers")
 @click.argument("url_token")
-@click.option("-l", "--limit", default=10, help="Max results", show_default=True)
+@click.option(
+    "-l",
+    "--limit",
+    default=10,
+    type=click.IntRange(min=1),
+    help="Items per page",
+    show_default=True,
+)
 @click.option("--json", "as_json", is_flag=True, help="Output raw JSON")
-def user_answers(url_token: str, limit: int, as_json: bool):
+@pagination_options
+@click.option("--sort", "sort_by", default="created", type=click.Choice(["created", "voteups"]))
+def user_answers(url_token: str, limit: int, as_json: bool, sort_by: str, **paging):
     """List answers by a user."""
     with _get_client() as client:
         try:
-            results = client.get_user_answers(url_token, limit=limit)
+            offset = paging.pop("offset")
+            results = collect_pages(
+                client,
+                lambda: client.get_user_answers(
+                    url_token, limit=limit, offset=offset, sort_by=sort_by
+                ),
+                **paging,
+            )
             data = results.get("data", [])
         except Exception as e:
             print_error(f"Failed to fetch answers: {e}")
@@ -110,13 +126,29 @@ def user_answers(url_token: str, limit: int, as_json: bool):
 
 @click.command("user-articles")
 @click.argument("url_token")
-@click.option("-l", "--limit", default=10, help="Max results", show_default=True)
+@click.option(
+    "-l",
+    "--limit",
+    default=10,
+    type=click.IntRange(min=1),
+    help="Items per page",
+    show_default=True,
+)
 @click.option("--json", "as_json", is_flag=True, help="Output raw JSON")
-def user_articles(url_token: str, limit: int, as_json: bool):
+@pagination_options
+@click.option("--sort", "sort_by", default="created", type=click.Choice(["created", "voteups"]))
+def user_articles(url_token: str, limit: int, as_json: bool, sort_by: str, **paging):
     """List articles by a user."""
     with _get_client() as client:
         try:
-            results = client.get_user_articles(url_token, limit=limit)
+            offset = paging.pop("offset")
+            results = collect_pages(
+                client,
+                lambda: client.get_user_articles(
+                    url_token, limit=limit, offset=offset, sort_by=sort_by
+                ),
+                **paging,
+            )
             data = results.get("data", [])
         except Exception as e:
             print_error(f"Failed to fetch articles: {e}")
@@ -147,13 +179,26 @@ def user_articles(url_token: str, limit: int, as_json: bool):
 
 @click.command()
 @click.argument("url_token")
-@click.option("-l", "--limit", default=10, help="Max results", show_default=True)
+@click.option(
+    "-l",
+    "--limit",
+    default=10,
+    type=click.IntRange(min=1),
+    help="Items per page",
+    show_default=True,
+)
 @click.option("--json", "as_json", is_flag=True, help="Output raw JSON")
-def followers(url_token: str, limit: int, as_json: bool):
+@pagination_options
+def followers(url_token: str, limit: int, as_json: bool, **paging):
     """List a user's followers."""
     with _get_client() as client:
         try:
-            results = client.get_followers(url_token, limit=limit)
+            offset = paging.pop("offset")
+            results = collect_pages(
+                client,
+                lambda: client.get_followers(url_token, limit=limit, offset=offset),
+                **paging,
+            )
             data = results.get("data", [])
         except Exception as e:
             print_error(f"Failed to fetch followers: {e}")
@@ -186,13 +231,26 @@ def followers(url_token: str, limit: int, as_json: bool):
 
 @click.command()
 @click.argument("url_token")
-@click.option("-l", "--limit", default=10, help="Max results", show_default=True)
+@click.option(
+    "-l",
+    "--limit",
+    default=10,
+    type=click.IntRange(min=1),
+    help="Items per page",
+    show_default=True,
+)
 @click.option("--json", "as_json", is_flag=True, help="Output raw JSON")
-def following(url_token: str, limit: int, as_json: bool):
+@pagination_options
+def following(url_token: str, limit: int, as_json: bool, **paging):
     """List who a user follows."""
     with _get_client() as client:
         try:
-            results = client.get_following(url_token, limit=limit)
+            offset = paging.pop("offset")
+            results = collect_pages(
+                client,
+                lambda: client.get_following(url_token, limit=limit, offset=offset),
+                **paging,
+            )
             data = results.get("data", [])
         except Exception as e:
             print_error(f"Failed to fetch following: {e}")

@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-
-import pytest
 
 from zhihu_cli.auth import (
     _dict_to_cookie_str,
@@ -17,7 +14,6 @@ from zhihu_cli.auth import (
     get_saved_cookie_string,
     save_cookies,
 )
-
 
 # ── cookie_str_to_dict ─────────────────────────────────────────────────────────
 

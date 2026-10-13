@@ -2,7 +2,7 @@
 name: zhihu-cli
 description: "知乎 CLI (pyzhihu-cli)：搜索、热榜、问题/回答/评论、推荐 Feed、用户资料、发想法/提问/文章、删自己的内容、点赞关注、收藏与通知。Agent 代执行 zhihu 命令，Cookie 仅存本地。"
 author: BAIGUANGMEI
-version: "0.2.6"
+version: "0.3.0"
 tags:
   - zhihu
   - cli
@@ -10,7 +10,7 @@ tags:
   - agent
 ---
 
-# zhihu-cli 技能
+# zhihu-cli-plus 技能
 
 ## 前提
 
@@ -37,6 +37,9 @@ tags:
 
 ## 安装与更新
 
+Plus 尚未独立发布到 PyPI；应在本 fork 的源码目录和专用虚拟环境中运行
+`python -m pip install -e .`。下面的 PyPI 安装/更新命令针对上游，不能用于升级未发布的 Plus。
+
 - **安装**（任选其一）：
   - `uv tool install pyzhihu-cli`
   - `pipx install pyzhihu-cli`
@@ -49,7 +52,7 @@ tags:
 ## Agent 规则
 
 1. **诉求 → 命令**：按下表映射。
-2. **数据查询优先用 --json**：凡执行**数据查询类**指令（如 `search`、`hot`、`question`、`answers`、`answer`、`user`、`user-answers`、`user-articles`、`followers`、`following`、`feed`、`topic`、`collections`、`notifications`、`whoami` 等），**必须**带 `--json`，以获取 API 返回的完整数据，便于解析、汇总或向用户展示；不得仅依赖终端表格等非结构化输出。例外：`feeds` 当前不支持 `--json`；需要展示回答评论时使用 `answer --comments`（`--json` 只输出回答详情，不输出评论）。
+2. **数据查询优先用 --json**：凡执行**数据查询类**指令（如 `search`、`hot`、`question`、`answers`、`answer`、`user`、`user-answers`、`user-articles`、`followers`、`following`、`feed`、`topic`、`collections`、`notifications`、`whoami` 等），**必须**带 `--json`，以获取 API 返回的完整数据，便于解析、汇总或向用户展示；不得仅依赖终端表格等非结构化输出。`feeds --json` 包含详情与评论；`answer --comments --json` 会将评论放在 `comments` 集合中。所有子命令均支持 JSON，错误和进度写入 stderr。
 3. **需登录时**：先 `zhihu status`；未登录则 `zhihu login --qrcode` 或引导用户 `zhihu login --cookie "..."`。
 4. **扫码登录**：执行 `zhihu login --qrcode` 后，若本轮未发过二维码且用户已配置 OpenClaw → 先将二维码复制到 OpenClaw 工作目录的 `media` 文件夹，再 `openclaw message send --channel <渠道> --target <目标> --media <media 路径>/login_qrcode.png --message "请用知乎 App 扫码并确认登录"`；**保持登录进程不中断**直到成功/失败/超时；用户说「重新登录/换号」则中断当前进程再重新执行登录。**复制步骤**：Linux/macOS：`mkdir -p ~/.openclaw/workspace/media && cp ~/.zhihu-cli/login_qrcode.png ~/.openclaw/workspace/media/`；Windows：`mkdir "%USERPROFILE%\.openclaw\workspace\media" 2>nul & copy "%USERPROFILE%\.zhihu-cli\login_qrcode.png" "%USERPROFILE%\.openclaw\workspace\media\login_qrcode.png"`（若 OpenClaw 工作目录不同则替换为实际路径）。
 5. **安全**：Cookie 仅本地；优先扫码，避免在不可信处粘贴 Cookie；可提醒 `zhihu logout` 清空。
@@ -68,9 +71,9 @@ tags:
 | 搜索 | `zhihu search "关键词" [--type general/people/topic] [--limit N] [--answers N] [--json]` |
 | 热榜 | `zhihu hot [--limit N] [--answers N] [--json]` |
 | 问题 | `zhihu question <id> [--json]`；回答列表 `zhihu answers <id> [--limit N] [--sort default/created] [--json]` |
-| 回答详情 | `zhihu answer <id> [--comments] [--limit N] [--json]`（评论默认全部，`--limit 0` 为全部） |
+| 回答详情 | `zhihu answer <id> [--comments] [--limit N] [--json]`（JSON 包含评论，`--limit 0` 为全部） |
 | 用户 | `zhihu user <url_token> [--json]`；`user-answers` / `user-articles` / `followers` / `following` 均支持 `--limit N --json` |
-| 推荐 / 话题 | `zhihu feed [--limit N] [--json]`；`zhihu feeds [--limit N] [--comment-limit N]`；`zhihu topic <id> [--json]` |
+| 推荐 / 话题 | `zhihu feed [--limit N] [--json]`；`zhihu feeds [--limit N] [--comment-limit N] [--json]`；`zhihu topic <id> [--json]` |
 | 赞同 | `zhihu vote <answer_id>`；取消 `zhihu vote <answer_id> --neutral` |
 | 关注问题 | `zhihu follow-question <id>`；取消 `zhihu follow-question <id> --unfollow` |
 | 发提问 | `zhihu ask "标题" [-d "描述"] [-t 话题id ...] [-i 图 ...]` |
@@ -91,7 +94,7 @@ tags:
   → 否则：查上表得命令
     → 若该命令需登录：zhihu status → 未登录则 zhihu login --qrcode 或 --cookie
       → 若扫码且未发过图：复制到 media → openclaw message send --media ... → 保持进程
-    → 执行 zhihu <子命令>（数据查询类必须带 --json；feeds 和 answer --comments 除外）
+    → 执行 zhihu <子命令>（数据查询类必须带 --json）
     → 整理结果或报错提示
 ```
 
@@ -106,6 +109,23 @@ tags:
 
 ---
 
+## Plus 分页与评论
+
+- 独立评论：`zhihu comments <id> --type answer/article/pin --json`，可选 `--order reverse`。
+- 集合命令：`--offset` 指定起点，`--next-url` 传入 API 的 `paging.next`，`--all` 拉取所有页，
+  `--max-pages` 默认 100，达到上限但未结束会报错，不返回部分成功。
+- `feed` / `feeds` 使用 `--page` 指定首页；自动翻页仍跟随 `paging.next`。
+- `--limit` 控制每页数量；`answer --comments --limit 0` 默认全部评论，每页 20 条。
+- `feeds --all-comments` 拉取每条内容的全部评论，`--all` 控制推荐流翻页。
+- JSON 集合保留 `data` 与 `paging`，多页添加 `pages_fetched`。
+- `status` 严格离线，不修复 Cookie；`whoami` 才在线验证。
+- 文章/想法评论使用 V5 接口，`like_count` 与已有 `child_comments` 会保留。
+- GET 返回 403 / code 10003 时，客户端自动计算 ZSE 签名并有限重试；不清空 Cookie。
+  普通权限拒绝和登录态失效不走此逻辑。问题详情与关联回答已在真实线上通过。
+- 2026-10-13：28 个只读线上用例全部通过；发布/删除仍使用模拟测试。
+- 线上测试：`pytest -m integration --live tests/test_live.py`，默认关闭，运行时只允许 GET。
+- 写入失败或返回缺失 ID 时不要盲目重试；先确认线上结果，避免重复发布。
+
 ## 常用示例
 
 ```bash
@@ -115,10 +135,10 @@ zhihu search "Python" --json
 zhihu hot --limit 10 --json
 zhihu question 12345678 --json
 zhihu answers 12345678 --limit 5 --json
-zhihu answer 87654321 --comments --limit 5
+zhihu answer 87654321 --comments --limit 5 --json
 zhihu user someone --json
 zhihu feed --limit 5 --json
-zhihu feeds --limit 3 --comment-limit 5
+zhihu feeds --limit 3 --comment-limit 5 --json
 zhihu vote 87654321
 zhihu pin "标题" -c "<p>正文</p>"
 zhihu delete-pin 98765432 -y
@@ -145,6 +165,6 @@ zhihu logout
 
 ## 错误处理
 
-- **未登录 / 401 / 403**：先登录（`zhihu login --qrcode` 或 `--cookie`），再执行原命令。
+- **401**：登录态失效，重新登录。**403**：可能是权限或风控拒绝，不直接清空现有登录态。
 - **超时 / 网络**：提示重试或检查网络。
 - **其他**：根据 CLI 报错给简短原因与建议（如检查 ID、url_token）。

@@ -12,26 +12,28 @@ from html import unescape
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from rich.text import Text
 from rich.theme import Theme
 
 # ── Theme ──────────────────────────────────────────────────────────────────────
 
-ZHIHU_THEME = Theme({
-    "info": "dim cyan",
-    "success": "bold green",
-    "warning": "bold yellow",
-    "error": "bold red",
-    "title": "bold cyan",
-    "subtitle": "dim white",
-    "accent": "bold blue",
-    "muted": "dim",
-    "stat.key": "cyan",
-    "stat.value": "white",
-    "badge": "bold magenta",
-})
+ZHIHU_THEME = Theme(
+    {
+        "info": "dim cyan",
+        "success": "bold green",
+        "warning": "bold yellow",
+        "error": "bold red",
+        "title": "bold cyan",
+        "subtitle": "dim white",
+        "accent": "bold blue",
+        "muted": "dim",
+        "stat.key": "cyan",
+        "stat.value": "white",
+        "badge": "bold magenta",
+    }
+)
 
 console = Console(theme=ZHIHU_THEME)
+error_console = Console(theme=ZHIHU_THEME, stderr=True)
 
 # ── Brand ──────────────────────────────────────────────────────────────────────
 
@@ -44,8 +46,7 @@ def print_banner():
     ver = _get_version()
     console.print(
         Panel(
-            f"{BRAND}  [dim]v{ver}[/dim]\n"
-            "[dim]知乎命令行工具 — Search, Read, Interact[/dim]",
+            f"{BRAND}  [dim]v{ver}[/dim]\n[dim]知乎命令行工具 — Search, Read, Interact[/dim]",
             border_style="blue",
             padding=(0, 2),
         ),
@@ -55,10 +56,12 @@ def print_banner():
 
 def _get_version() -> str:
     from . import __version__
+
     return __version__
 
 
 # ── Message helpers ────────────────────────────────────────────────────────────
+
 
 def print_success(msg: str):
     """Print a success message."""
@@ -67,12 +70,12 @@ def print_success(msg: str):
 
 def print_error(msg: str):
     """Print an error message."""
-    console.print(f"  [error]✗[/error] {msg}")
+    error_console.print(f"  [error]✗[/error] {msg}")
 
 
 def print_warning(msg: str):
     """Print a warning message."""
-    console.print(f"  [warning]![/warning] {msg}")
+    error_console.print(f"  [warning]![/warning] {msg}")
 
 
 def print_info(msg: str):
@@ -87,12 +90,24 @@ def print_hint(msg: str):
 
 # ── Text utilities ─────────────────────────────────────────────────────────────
 
+
 def strip_html(text: str) -> str:
     """Remove HTML tags and unescape entities."""
     if not text:
         return ""
+    text = re.sub(r"<(?:br\s*/?|/p|/div|/li|/h[1-6])\s*>", "\n", text, flags=re.IGNORECASE)
     clean = re.sub(r"<[^>]+>", "", text)
     return unescape(clean).strip()
+
+
+def to_html(text: str) -> str:
+    """Keep supplied HTML intact; escape and paragraph-wrap plain text."""
+    from html import escape
+
+    text = text.strip()
+    if re.search(r"<[a-zA-Z][^>]*>", text):
+        return text
+    return "".join(f"<p>{escape(line)}</p>" for line in text.splitlines())
 
 
 def format_count(count: int | str) -> str:
@@ -116,10 +131,11 @@ def truncate(text: str, max_len: int = 50) -> str:
     text = text.replace("\n", " ")
     if len(text) <= max_len:
         return text
-    return text[:max_len - 1] + "…"
+    return text[: max_len - 1] + "…"
 
 
 # ── Table factories ────────────────────────────────────────────────────────────
+
 
 def make_table(title: str, *, show_lines: bool = False, pad_edge: bool = False) -> Table:
     """Create a branded Table with standard styling."""
@@ -150,6 +166,7 @@ def make_kv_table(title: str) -> Table:
 
 
 # ── Stats display ──────────────────────────────────────────────────────────────
+
 
 def format_stats_line(pairs: dict[str, str | int]) -> str:
     """Create an inline stats display like '▸ 1.2万 Answers  ▸ 500 Followers'."""

@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -96,3 +94,44 @@ def mock_hot_list():
             },
         ],
     }
+
+
+@pytest.fixture(autouse=True)
+def no_live_network(monkeypatch, request):
+    """Unit tests may only use mocked HTTP and must never touch a real account."""
+
+    if request.node.get_closest_marker("integration"):
+        if not request.config.getoption("--live"):
+            pytest.skip("Explicit --live is required for online tests")
+        import time
+
+        import requests
+
+        original_request = requests.sessions.Session.request
+        last_request = [0.0]
+
+        def read_only(session, method, *args, **kwargs):
+            if method.upper() != "GET":
+                raise AssertionError("Online tests only allow GET requests")
+            time.sleep(max(0.0, 0.25 - (time.monotonic() - last_request[0])))
+            last_request[0] = time.monotonic()
+            return original_request(session, method, *args, **kwargs)
+
+        monkeypatch.setattr("requests.sessions.Session.request", read_only)
+        return
+
+    def blocked(*args, **kwargs):
+        raise AssertionError("Live HTTP is disabled in unit tests")
+
+    monkeypatch.setattr("requests.sessions.Session.request", blocked)
+    monkeypatch.setattr("zhihu_cli.client.time.sleep", lambda _: None)
+
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--live", action="store_true", help="Enable read-only online integration tests"
+    )
+    parser.addoption(
+        "--live-article-id", help="Optional published article for online comment tests"
+    )
+    parser.addoption("--live-pin-id", help="Optional published pin for online comment tests")

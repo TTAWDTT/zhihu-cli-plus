@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from click.testing import CliRunner
 
+from zhihu_cli import __version__
 from zhihu_cli.cli import cli
 
 # Patch target — ZhihuClient is lazy-imported inside function bodies via
@@ -44,18 +45,31 @@ class TestCliGroup:
     def test_version(self, runner):
         result = runner.invoke(cli, ["--version"])
         assert result.exit_code == 0
-        assert "0.1.0" in result.output
+        assert __version__ in result.output
 
     def test_all_commands_registered(self, runner):
         result = runner.invoke(cli, ["--help"])
         expected = [
-            "login", "logout", "status", "whoami",
-            "search", "hot", "question", "answer", "answers",
-            "feed", "topic",
-            "user", "user-answers", "user-articles",
-            "followers", "following",
-            "vote", "follow-question",
-            "collections", "notifications",
+            "login",
+            "logout",
+            "status",
+            "whoami",
+            "search",
+            "hot",
+            "question",
+            "answer",
+            "answers",
+            "feed",
+            "topic",
+            "user",
+            "user-answers",
+            "user-articles",
+            "followers",
+            "following",
+            "vote",
+            "follow-question",
+            "collections",
+            "notifications",
         ]
         for cmd in expected:
             assert cmd in result.output, f"Command '{cmd}' not found in help output"
@@ -90,7 +104,7 @@ class TestLogoutCommand:
 
 class TestLoginCommand:
     def test_login_with_valid_cookie(self, runner, tmp_config_dir):
-        result = runner.invoke(cli, ["login", "--cookie", "z_c0=test_abc"])
+        result = runner.invoke(cli, ["login", "--cookie", "z_c0=test_abc; _xsrf=x; d_c0=d"])
         assert result.exit_code == 0
         assert "Cookie saved" in result.output
 
@@ -168,14 +182,14 @@ class TestSearchCommand:
 
 class TestHotCommand:
     def test_hot_displays_table(self, runner, saved_cookies, mock_hot_list):
-        mc = _make_mock_client(get_hot_list=mock_hot_list)
+        mc = _make_mock_client(get_hot_list=mock_hot_list, get_question_answers={"data": []})
         with patch(_CLIENT_PATCH, return_value=mc):
             result = runner.invoke(cli, ["hot", "--limit", "2"])
             assert result.exit_code == 0
-            assert "Trending" in result.output
+            assert "Hot question 1" in result.output
 
     def test_hot_json(self, runner, saved_cookies, mock_hot_list):
-        mc = _make_mock_client(get_hot_list=mock_hot_list)
+        mc = _make_mock_client(get_hot_list=mock_hot_list, get_question_answers={"data": []})
         with patch(_CLIENT_PATCH, return_value=mc):
             result = runner.invoke(cli, ["hot", "--json"])
             assert result.exit_code == 0
@@ -336,7 +350,7 @@ class TestAskCommand:
         mc = _make_mock_client(create_question={})
         with patch(_CLIENT_PATCH, return_value=mc):
             result = runner.invoke(cli, ["ask", "Q"])
-            assert result.exit_code == 0
+            assert result.exit_code == 1
             assert "may have been created" in result.output
 
     def test_ask_error(self, runner, saved_cookies):
@@ -359,7 +373,7 @@ class TestPinCommand:
         mc = _make_mock_client(create_pin={})
         with patch(_CLIENT_PATCH, return_value=mc):
             result = runner.invoke(cli, ["pin", "Text"])
-            assert result.exit_code == 0
+            assert result.exit_code == 1
             assert "may have been created" in result.output
 
     def test_pin_error(self, runner, saved_cookies):
@@ -382,15 +396,13 @@ class TestArticleCommand:
         mc = _make_mock_client(create_article={})
         with patch(_CLIENT_PATCH, return_value=mc):
             result = runner.invoke(cli, ["article", "Title", "Body"])
-            assert result.exit_code == 0
+            assert result.exit_code == 1
             assert "may have been published" in result.output
 
     def test_article_with_topics(self, runner, saved_cookies):
         mc = _make_mock_client(create_article={"id": "art456"})
         with patch(_CLIENT_PATCH, return_value=mc):
-            result = runner.invoke(
-                cli, ["article", "T", "B", "-t", "100", "-t", "200"]
-            )
+            result = runner.invoke(cli, ["article", "T", "B", "-t", "100", "-t", "200"])
             assert result.exit_code == 0
             assert "art456" in result.output
 
