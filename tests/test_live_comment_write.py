@@ -82,6 +82,14 @@ def test_approved_root_reply_child_reply_and_cleanup(request):
                     state["deleted"].append(comment_id)
                 except Exception as error:
                     failures.append(f"{comment_id}: {type(error).__name__}: {error}")
+            request.node.user_properties.extend(
+                [
+                    ("approved_pin_id", state["pin_id"]),
+                    ("post_requests", str(state["posts"])),
+                    ("created_comment_ids", ",".join(state["created"])),
+                    ("deleted_comment_ids", ",".join(state["deleted"])),
+                ]
+            )
             if failures:
                 pytest.fail("Cleanup needs attention: " + "; ".join(failures))
         assert state["posts"] == 3
