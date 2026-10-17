@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.8.0 (unreleased)
+## 0.8.0
 
 - Add `dm-inbox`, `dm-read` and `dm-reply` for conversation lists, paginated message history and text replies.
 - Bind private-message cursors to the selected participant and normalize web history links to API routes.
