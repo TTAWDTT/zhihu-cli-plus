@@ -103,6 +103,11 @@ def no_live_network(monkeypatch, request):
     if request.node.get_closest_marker("integration"):
         if not request.config.getoption("--live"):
             pytest.skip("Explicit --live is required for online tests")
+        if request.node.get_closest_marker("integration_dm_write"):
+            from tests.test_live_messages import enable_dm_guard
+
+            enable_dm_guard(monkeypatch, request)
+            return
         if request.node.get_closest_marker("integration_workflow_write"):
             from tests.test_live_workflow_write import enable_guard
 
@@ -237,6 +242,13 @@ def _enable_comment_like_test(monkeypatch, request):
 
 
 def pytest_addoption(parser):
+    parser.addoption(
+        "--live-dm-user-id", help="Participant explicitly selected for private-message tests"
+    )
+    parser.addoption(
+        "--live-dm-send", action="store_true", help="Allow one explicitly approved private message"
+    )
+    parser.addoption("--live-dm-text", help="Exact approved private-message test text")
     parser.addoption(
         "--live", action="store_true", help="Enable read-only online integration tests"
     )

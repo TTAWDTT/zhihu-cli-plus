@@ -22,6 +22,7 @@ from .commands.interact import (
     pin,
     vote,
 )
+from .commands.messages import dm_inbox, dm_read, dm_reply
 from .commands.user import followers, following, user, user_answers, user_articles
 from .commands.workflows import WORKFLOW_COMMANDS
 
@@ -84,6 +85,9 @@ cli.add_command(comment_detail)
 cli.add_command(replies)
 cli.add_command(delete_comment)
 cli.add_command(like_comment)
+cli.add_command(dm_inbox)
+cli.add_command(dm_read)
+cli.add_command(dm_reply)
 for workflow_command in WORKFLOW_COMMANDS:
     cli.add_command(workflow_command)
 

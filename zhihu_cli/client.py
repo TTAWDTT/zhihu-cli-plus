@@ -36,13 +36,14 @@ from .config import (
 )
 from .display import strip_html, to_html
 from .exceptions import DataFetchError, LoginError
+from .messaging import MessagingClientMixin
 from .signing import sign_get_headers, sign_request_headers
 from .workflow_client import WorkflowClientMixin
 
 logger = logging.getLogger(__name__)
 
 
-class ZhihuClient(WorkflowClientMixin):
+class ZhihuClient(MessagingClientMixin, WorkflowClientMixin):
     """Requests-based Zhihu API client.
 
     Uses cookie authentication to access Zhihu's V4 API.
