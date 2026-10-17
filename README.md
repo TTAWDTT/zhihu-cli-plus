@@ -5,7 +5,7 @@
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://github.com/TTAWDTT/zhihu-cli-plus/blob/main/pyproject.toml)
 [![License](https://img.shields.io/badge/License-Apache--2.0-blue)](LICENSE)
 
-独立维护的知乎命令行增强版。支持 JSON、游标分页、评论与回复、评论点赞和签名请求。
+独立维护的知乎命令行增强版。支持 JSON、游标分页、评论与回复、私信、收藏夹和签名请求。
 Python 分发包名从 0.6.0 起为 **`zhihu-cli-plus`**，终端命令仍是 **`zhihu`**，Python 模块仍是 `zhihu_cli`。
 
 项目基于 [BAIGUANGMEI/zhihu-cli](https://github.com/BAIGUANGMEI/zhihu-cli) 的代码发展，保留原始提交历史、作者信息和 Apache-2.0 许可。Plus 自行维护接口、测试与发布；来源说明见 [NOTICE](NOTICE)，版本变化见 [CHANGELOG](CHANGELOG.md)。
@@ -63,6 +63,7 @@ zhihu user-answers <用户url_token> --all --json
 ```
 
 支持分页的集合提供 `--all`、`--offset`、`--next-url`、`--max-pages`。默认最多 100 页，按服务器的 `paging.next` 原样续读；达到页数上限、重复游标或后续请求失败会明确报错。
+私信使用 `--after-id` 作为消息边界，详见下面的私信命令。
 `--limit` 控制每页数量。兼容旧行为：`answer --comments --limit 0` 获取全部根评论，`feeds --comment-limit 0` 隐藏评论。
 
 ## 评论、回复和点赞
@@ -93,6 +94,28 @@ zhihu delete-comment <评论ID> --dry-run --json
 
 纯文本会转义为 HTML；只有 `--html` 显式启用时才直接提交 HTML。评论写入、删除、点赞和取消点赞均签名、携带 CSRF 头，写操作不自动重试。
 超时或响应不明确时应读回检查，再决定是否重试。API 接收不等于评论已公开展示，审核和仅自己可见的字段会保留。
+
+## 私信会话、历史和回复
+
+先列出会话，再用对方的用户 ID 读取或回复：
+
+```bash
+zhihu dm-inbox --limit 20 --json
+zhihu dm-read <对方用户ID> --limit 20 --json
+zhihu dm-read <对方用户ID> --all --max-pages 10 --json
+zhihu dm-read <对方用户ID> --after-id <消息ID> --json
+zhihu dm-read <对方用户ID> --next-url '<上次的paging.next>' --json
+zhihu dm-reply <对方用户ID> '回复正文' --dry-run --json
+zhihu dm-reply <对方用户ID> --file message.txt --dry-run --json
+```
+
+`dm-inbox` 的 `participant.id` 是对方的 32 位用户 ID。会话的 `id`、消息的 `id` 和用户主页的 `url_token` 不能当作这个参数。如果只有主页链接，用 `zhihu user <url_token> --json` 查询其 `id`。
+
+知乎可能在读取会话时将消息标为已读。`dm-inbox` 列出会话，不主动打开其中的私信。历史按最新消息在前的顺序返回；`--after-id` 读取更早的记录。分页会检查收件人，网页形式的 `/messages` 游标会转换为私信 API 地址。
+
+私信历史的 JSON 把消息列表放在 `data`，参与者信息放在 `conversation`，并保留消息 ID、媒体字段、分页和平台提示。终端显示作者、消息 ID 和正文；媒体消息显示类型提示。`--limit` 是每页请求数量，后续页使用服务器返回的游标参数。
+
+`dm-reply` 向指定用户发送一条纯文本私信。去掉 `--dry-run` 才会实际发送。预览不读取凭证、不联网；正文参数和 `--file` 只能选一个。成功结果保留服务器确认的消息 ID，不代表对方已经阅读。请求签名绑定实际发送的 UTF-8 字节；写请求不自动重试。超时或确认信息异常时，先用 `dm-read` 读回，避免重复发送。
 
 ## 0.7：内容工作流与浏览历史
 

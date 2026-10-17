@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.0 (unreleased)
+
+- Add `dm-inbox`, `dm-read` and `dm-reply` for conversation lists, paginated message history and text replies.
+- Bind private-message cursors to the selected participant and normalize web history links to API routes.
+- Preserve message IDs, participant information, media fields and platform warnings in JSON.
+- Sign exact reply bytes, support offline previews and files, and never retry a message automatically.
+- Add mocked protocol tests and opt-in live tests with an exact-recipient, one-message guard.
+- Document conversation-read side effects and distinguish participant IDs, thread IDs and message IDs.
+
 ## 0.7.0
 
 - Add article/pin detail, user pins/questions/activities/collections and followed activity.
